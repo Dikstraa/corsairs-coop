@@ -112,6 +112,19 @@ warring ships, floating barrels) are the same for everybody. Quest encounters an
   are ignored), so a puppet is created where its ship is, and when the ship leaves the scene it
   sails away and comes back when the player does.
 
+Hits and sinkings (`CoopNet_SeaHullHit` at the top of `Ship_ApplyHullHitpoints(WithCannon)`,
+`CoopNet_SeaShipDead` at the top of `ShipDead`):
+
+- A hit on a puppet by a ship this machine runs is not applied here: it goes to the puppet's own
+  machine with this side's gunnery perks already in the damage, and that machine applies it with
+  its ship's defences and remembers who hit last. Hits by puppets are only for show; the shooter's
+  machine sends the real ones. Puppets show the hull their own machine reports.
+- A ship that sinks is reported to everybody with whoever finished it. The puppet then sinks through
+  `ShipDead` with the killer's ship on that machine: the real ship on the killer's machine, so the
+  kill, experience and statistics go to the player who finished it, as in the single-player game.
+- Puppets make no decisions of their own (`Ship_CheckSituation` skips them), turn at any speed and
+  slow down to turn when their goal is off the bow.
+
 Joining from the world map: a player at sea within 5 map units (its open sea position, or where it
 left the map near an island) is offered in the game log; **F9** (or sailing into its avatar) loads
 this player into that scene, 200 sea units abeam of the other ship. `wdmReloadToSea` then takes the

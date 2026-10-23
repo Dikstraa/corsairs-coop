@@ -254,6 +254,17 @@ void CoopNet_TestSea()
 		if (CoopNet_GetEnv("COOPNET_SEAFLAGS") == "1") CoopNet_TestFlags();		CoopNet_Log("test: to the sea from map x " + worldMap.playerShipX);
 		wdmReloadToSea();
 	}
+	if (bSeaActive && CoopNet_GetEnv("COOPNET_SEAFLAGS") == "1")
+	{
+		if (iCoopNetTestMapTicks == 550 && CoopNet_State() == COOPNET_HOSTING) CoopNet_TestAttack();
+		if (iCoopNetTestMapTicks == 750 && CoopNet_State() == COOPNET_CONNECTED) CoopNet_TestAttack();
+	}
+	if (false)
+	{
+		CoopNet_TestAttack();
+		return;
+	}
+	if (iCoopNetTestMapTicks == 1100 && CoopNet_GetEnv("COOPNET_SEAFLAGS") == "1") return;
 	if (iCoopNetTestMapTicks == 550 && bSeaActive && CoopNet_State() == COOPNET_HOSTING)
 	{
 		CoopNet_Log("test: host sets full sails");
@@ -285,6 +296,29 @@ void CoopNet_TestFlags()
 	SetCrewQuantityFull(rMate);
 	SetCompanionIndex(pchar, -1, iMate);
 	CoopNet_Log("test: client sails under England with companion " + rMate.id);
+}
+// COOPNET_SEAFLAGS=1 at sea: the host's hull goes down to 20%, then a ball of the client's companion
+// hits the host's flagship for 500.
+void CoopNet_TestAttack()
+{
+	if (CoopNet_State() == COOPNET_HOSTING)
+	{
+		pchar.Ship.HP = 0.2 * stf(RealShips[sti(pchar.Ship.Type)].HP);
+		CoopNet_Log("test: host hull down to " + pchar.Ship.HP);
+		return;
+	}
+	int iMate = GetCharacterIndex("CoopTestMate");
+	if (!CheckAttribute(&CoopNetSea, "p0.ships")) return;
+	aref arShips;
+	makearef(arShips, CoopNetSea.p0.ships);
+	int iNum = GetAttributesNum(arShips);
+	for (int i = 0; i < iNum; i++)
+	{
+		aref arS = GetAttributeN(arShips, i);
+		if (sti(arS.flags) != COOPNET_SEA_FLAGSHIP || !sti(arS.inSea)) continue;
+		CoopNet_Log("test: companion hits " + Characters[sti(arS.chr)].id + " for 500");
+		Ship_ApplyHullHitpoints(&Characters[sti(arS.chr)], 500.0, KILL_BY_BALL, iMate);
+	}
 }
 // COOPNET_TESTSKIP=1: ~10 s into the game this player sleeps 8 hours through WaitDate.
 void CoopNet_TestSkip()
@@ -567,6 +601,16 @@ void CoopNet_Dispatch(int iType)
 	if (iType == COOPNET_MSG_SEA)
 	{
 		CoopNet_OnSea(iFrom);
+		return;
+	}
+	if (iType == COOPNET_MSG_SEA_HIT)
+	{
+		CoopNet_OnSeaHit(iFrom);
+		return;
+	}
+	if (iType == COOPNET_MSG_SEA_SINK)
+	{
+		CoopNet_OnSeaSink(iFrom);
 		return;
 	}
 

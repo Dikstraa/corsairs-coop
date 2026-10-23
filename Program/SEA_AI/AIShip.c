@@ -1129,6 +1129,7 @@ void Ship_CheckSituation()
 	
 	if (sti(rCharacter.index) == nMainCharacterIndex)  return; 
 	if (LAi_IsDead(rCharacter) || sti(rCharacter.ship.type) == SHIP_NOTUSED) { return; }  // super fix boal
+	if (CheckAttribute(rCharacter, "coopPuppet")) { return; } // co-op puppet: sails where its real ship is, decides nothing
 	
 	// Log_Testinfo("Ship_CheckSituation " + rCharacter.id);
 	
@@ -2195,6 +2196,7 @@ void Ship_ApplyCrewHitpointsWithCannon(ref rOurCharacter, float fCrewHP, float f
 void Ship_ApplyHullHitpoints(ref rOurCharacter, float fHP, int iKillStatus, int iKillerCharacterIndex)
 {
    	if (LAi_IsImmortal(rOurCharacter)) { return; }
+	if (CoopNet_SeaHullHit(rOurCharacter, fHP, iKillStatus, iKillerCharacterIndex, false)) { return; } // co-op: the ship's own machine applies it
 
 	float fCurHP;
 	float fMinus = 0.0;
@@ -2238,6 +2240,7 @@ void Ship_ApplyHullHitpoints(ref rOurCharacter, float fHP, int iKillStatus, int 
 void Ship_ApplyHullHitpointsWithCannon(ref rOurCharacter, float fHP, int iKillStatus, int iKillerCharacterIndex)
 {
    	if (LAi_IsImmortal(rOurCharacter)) { return; }
+	if (CoopNet_SeaHullHit(rOurCharacter, fHP, iKillStatus, iKillerCharacterIndex, true)) { return; } // co-op: the ship's own machine applies it
 
 	float fCurHP;
 	float fMinus = 0.0;
@@ -2318,6 +2321,7 @@ void Ship_AddCharacterExp(ref rCharacter, int iExpQuantity)
 
 void ShipDead(int iDeadCharacterIndex, int iKillStatus, int iKillerCharacterIndex)
 {
+	CoopNet_SeaShipDead(iDeadCharacterIndex, iKillStatus, iKillerCharacterIndex); // co-op: tell the others who sank whom
 	ref rDead, rKillerCharacter, rBaseShip, rKillerBaseShip;
 	
 	rDead = GetCharacter(iDeadCharacterIndex);
@@ -3724,7 +3728,7 @@ void Ship_UpdateParameters()
 	if (CheckAttribute(rCharacter, "coopSpeed")) // co-op puppet: speed set from the other player's ship
 	{
 		arCharShip.MaxSpeedZ = rCharacter.coopSpeed;
-		arCharShip.MaxSpeedY = (1.5 * stf(arCharShip.MaxSpeedY));
+		arCharShip.MaxSpeedY = Bring2Range(0.07, 0.95, 0.00001, 1.0, 2.0 * fMaxSpeedY * fShipTurnRate); // turns at any speed
 	}
 	//Log_Info("MaxSpeedY = "  + arCharShip.MaxSpeedY);
 	// calculate immersion

@@ -4,6 +4,7 @@
 // CoopNet_Recv/From/Get*. Field encoding and system message types: see wire.h and session.h.
 #include "coop_clock.h"
 #include "coop_vote.h"
+#include "map_labels.h"
 #include "maelstrom_abi.h"
 #include "session.h"
 #include "wire.h"
@@ -17,13 +18,14 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <vector>
 
 using namespace mael;
 
 namespace
 {
 
-constexpr long kVersion = 8;
+constexpr long kVersion = 9;
 
 // Message types 10..99 are handled inside the DLL and never reach scripts.
 enum : uint16_t
@@ -410,6 +412,24 @@ void HookImport(HMODULE module, const char *name, void *hook)
     }
 }
 
+// Test runs (COOPNET_TEST set): keys a script holds down with CoopNet_TestKey, as the controls read them
+// (PCs_Controls.dll polls GetAsyncKeyState), so a test can sail the world map without the keyboard.
+bool g_testKeys[256] = {};
+
+SHORT WINAPI HookGetAsyncKeyState(int vk)
+{
+    if (vk >= 0 && vk < 256 && g_testKeys[vk])
+        return static_cast<SHORT>(0x8000);
+    return GetAsyncKeyState(vk);
+}
+
+SHORT WINAPI HookGetKeyState(int vk)
+{
+    if (vk >= 0 && vk < 256 && g_testKeys[vk])
+        return static_cast<SHORT>(0x8000);
+    return GetKeyState(vk);
+}
+
 void ReleaseMouseInBackground(HWND hwnd)
 {
     g_gameWindow = hwnd;
@@ -421,6 +441,11 @@ void ReleaseMouseInBackground(HWND hwnd)
         HookImport(module, "SetCursorPos", reinterpret_cast<void *>(HookSetCursorPos));
         HookImport(module, "ClipCursor", reinterpret_cast<void *>(HookClipCursor));
         HookImport(module, "SetCapture", reinterpret_cast<void *>(HookSetCapture));
+        if (GetEnvironmentVariableA("COOPNET_TEST", nullptr, 0) > 0)
+        {
+            HookImport(module, "GetAsyncKeyState", reinterpret_cast<void *>(HookGetAsyncKeyState));
+            HookImport(module, "GetKeyState", reinterpret_cast<void *>(HookGetKeyState));
+        }
     }
 }
 
@@ -652,9 +677,11 @@ DWORD __cdecl N_Update(VS_STACK *s)
     g_local.rate = g_fixedRate > 0 ? g_fixedRate : g_meter.Rate();
     MakeBorderless();
     static long reported = 0;
-    if (g_mouseHeldBack - reported >= 50)
+    static double reportedAt = 0;
+    if (g_mouseHeldBack != reported && now - reportedAt > 60.0) // once a minute at most
     {
         reported = g_mouseHeldBack;
+        reportedAt = now;
         Log("window: %ld mouse moves held back while the game is behind", g_mouseHeldBack);
     }
     if (Net().GetState() != coopnet::State::Offline)
@@ -1026,6 +1053,324 @@ DWORD __cdecl N_PutString(VS_STACK *s)
     return Return(s, 1L);
 }
 
+// ---- world map ships driven by the script ---------------------------------------------------------
+// WorldMap.dll can only create an encounter: a ship reads its position and heading once, when it is
+// made (WdmEnemyShip::SetSaveAttribute), so a ship that has to follow another player's would be made
+// again and again (a jump, a random heading, the old one fading out next to it). Instead the ship
+// object is found in memory once and driven every frame. It is created with a kMaxSpeed no other ship
+// has; WdmShip keeps ax, ay, az, dltAx, dltAz, speed, turnspd, baseV, kMaxSpeed in a row, and its
+// matrix (position x, y, z, 1 in the last row) a little before them. Every access is guarded, and
+// before each write the matrix and the zeroed speed are checked: a ship the map has let go is dropped,
+// never written.
+struct MapShip
+{
+    float key = 0;
+    float *ax = nullptr;  // ay = ax[1], speed = ax[5], turnspd = ax[6], kMaxSpeed = ax[8]
+    float *pos = nullptr; // x, y, z, 1
+    float x = 0, z = 0, vx = 0, vz = 0, ay = 0;
+    float lastX = 0, lastZ = 0, lastAy = 0; // where it is shown, which glides to where it should be
+    double at = 0;
+    double drivenAt = 0;
+    bool hasAy = false;
+    float maxStep = 0, maxOff = 0; // for the log: the biggest correction in a frame, the biggest gap
+    std::string label; // a name drawn under it ("": none)
+    double loggedAt = 0;
+};
+std::map<std::string, MapShip> g_mapShips;
+
+// Whether the floats before a kMaxSpeed at k look like a WdmShip standing at x, z.
+bool ProbeMapShip(float *k, float x, float z, float **outAx, float **outPos)
+{
+    __try
+    {
+        float *ax = k - 8;
+        for (int i = 0; i < 8; ++i)
+            if (!std::isfinite(ax[i]))
+                return false;
+        if (std::fabs(ax[1]) > 100.0f || std::fabs(ax[5]) > 1000.0f)
+            return false;
+        for (int back = 0; back < 400; ++back)
+        {
+            float *p = ax - 4 - back;
+            if (p[3] == 1.0f && std::fabs(p[1]) < 5.0f && std::fabs(p[0] - x) < 3.0f && std::fabs(p[2] - z) < 3.0f)
+            {
+                *outAx = ax;
+                *outPos = p;
+                return true;
+            }
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+    }
+    return false;
+}
+
+// Looks through one memory region for the bits of key; up to max finds go to found.
+int ScanRegion(const uint32_t *from, size_t count, uint32_t key, float **found, int have, int max)
+{
+    __try
+    {
+        for (size_t i = 0; i < count && have < max; ++i)
+            if (from[i] == key)
+                found[have++] = const_cast<float *>(reinterpret_cast<const float *>(from + i));
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+    }
+    return have;
+}
+
+bool DriveMapShip(float *ax, float *pos, float x, float z, float ay, float lastX, float lastZ, float key)
+{
+    __try
+    {
+        if (pos[3] != 1.0f || std::fabs(pos[1]) > 5.0f)
+            return false;
+        if (ax[8] != 0.0f && ax[8] != key)
+            return false;
+        if (std::fabs(pos[0] - lastX) > 5.0f || std::fabs(pos[2] - lastZ) > 5.0f)
+            return false; // not where it was left: no longer that ship
+        pos[0] = x;
+        pos[2] = z;
+        ax[1] = ay;
+        ax[5] = 0.0f; // its own speed and turning stay off: it only goes where it is put
+        ax[6] = 0.0f;
+        ax[8] = 0.0f;
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+    }
+    return false;
+}
+
+// int CoopNet_MapShipBind(string enc, float kSpeed, float x, float z)  just after creating it with
+// that kSpeed at x, z: 1 when the ship was found and will be driven from now on
+DWORD __cdecl N_MapShipBind(VS_STACK *s)
+{
+    float z = GetFloat(Pop(s));
+    float x = GetFloat(Pop(s));
+    float key = GetFloat(Pop(s));
+    std::string enc = ArgString(Pop(s));
+    if (key < 0.1f)
+        key = 0.1f; // CreateMerchantShipXZ does the same
+    uint32_t bits;
+    memcpy(&bits, &key, sizeof bits);
+    double started = RealNow();
+    MapShip ship;
+    int ships = 0;
+    int have = 0;
+    // the regions where ships were found before first (ships come from the same heap), then all
+    static std::vector<BYTE *> hot;
+    bool fromHot = false;
+    for (int pass = 0; pass < 2 && ships == 0; ++pass)
+    {
+        float *found[64];
+        have = 0;
+        MEMORY_BASIC_INFORMATION mbi;
+        if (pass == 0)
+        {
+            for (BYTE *base : hot)
+                if (VirtualQuery(base, &mbi, sizeof mbi) == sizeof mbi && mbi.State == MEM_COMMIT &&
+                    mbi.Protect == PAGE_READWRITE)
+                    have = ScanRegion(static_cast<const uint32_t *>(mbi.BaseAddress), mbi.RegionSize / 4, bits, found,
+                                      have, 64);
+        }
+        else
+        {
+            SYSTEM_INFO si;
+            GetSystemInfo(&si);
+            auto addr = static_cast<BYTE *>(si.lpMinimumApplicationAddress);
+            while (addr < si.lpMaximumApplicationAddress && have < 64 &&
+                   VirtualQuery(addr, &mbi, sizeof mbi) == sizeof mbi)
+            {
+                if (mbi.State == MEM_COMMIT && mbi.Type == MEM_PRIVATE && mbi.Protect == PAGE_READWRITE)
+                    have = ScanRegion(static_cast<const uint32_t *>(mbi.BaseAddress), mbi.RegionSize / 4, bits, found,
+                                      have, 64);
+                addr = static_cast<BYTE *>(mbi.BaseAddress) + mbi.RegionSize;
+            }
+        }
+        for (int i = 0; i < have; ++i)
+        {
+            float *ax = nullptr, *pos = nullptr;
+            if (ProbeMapShip(found[i], x, z, &ax, &pos))
+            {
+                ++ships;
+                ship.ax = ax;
+                ship.pos = pos;
+            }
+        }
+        fromHot = pass == 0;
+    }
+    if (ships == 1 && !fromHot)
+    {
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery(ship.ax, &mbi, sizeof mbi) == sizeof mbi)
+            hot.push_back(static_cast<BYTE *>(mbi.BaseAddress));
+    }
+    Log("map ship %s: kMaxSpeed %g found %d times, %d look like a ship at %.2f %.2f (%.0f ms%s)", enc.c_str(), key, have,
+        ships, x, z, (RealNow() - started) * 1000.0, fromHot ? ", known region" : "");
+    if (ships != 1)
+        return Return(s, 0L);
+    ship.key = key;
+    coopnet::HookMapLabels();
+    ship.x = ship.lastX = x;
+    ship.z = ship.lastZ = z;
+    ship.at = ship.drivenAt = RealNow();
+    g_mapShips[enc] = ship;
+    return Return(s, 1L);
+}
+
+// int CoopNet_MapShipSet(string enc, float x, float z, float vx, float vz, float ay)  where a driven
+// ship is now and how it moves (map units per second), till the next word
+DWORD __cdecl N_MapShipSet(VS_STACK *s)
+{
+    float ay = GetFloat(Pop(s));
+    float vz = GetFloat(Pop(s));
+    float vx = GetFloat(Pop(s));
+    float z = GetFloat(Pop(s));
+    float x = GetFloat(Pop(s));
+    std::string enc = ArgString(Pop(s));
+    auto it = g_mapShips.find(enc);
+    if (it == g_mapShips.end())
+        return Return(s, 0L);
+    MapShip &m = it->second;
+    m.x = x;
+    m.z = z;
+    m.vx = vx;
+    m.vz = vz;
+    m.ay = ay;
+    m.at = RealNow();
+    if (!m.hasAy)
+    {
+        m.hasAy = true;
+        m.lastAy = ay;
+    }
+    return Return(s, 1L);
+}
+
+// The shortest turn from a to b, in radians.
+float TurnBetween(float a, float b)
+{
+    float d = std::fmod(b - a, 6.2831853f);
+    if (d > 3.1415927f)
+        d -= 6.2831853f;
+    if (d < -3.1415927f)
+        d += 6.2831853f;
+    return d;
+}
+
+// int CoopNet_MapShipDrive(float meX, float meZ)  every frame on the world map: puts every driven ship where it
+// is now; meX, meZ: this player's own ship (for the names drawn under the others)
+DWORD __cdecl N_MapShipDrive(VS_STACK *s)
+{
+    float meZ = GetFloat(Pop(s));
+    float meX = GetFloat(Pop(s));
+    // Reports come twice a second, each with its own small error: snapping to every one makes the ship
+    // jerk. So the ship shown sails on with the reported speed and closes the gap to where the player
+    // should be over about half a second (it jumps only when it is far off), and turns gradually.
+    std::vector<coopnet::MapLabel> labels;
+    double now = RealNow();
+    for (auto it = g_mapShips.begin(); it != g_mapShips.end();)
+    {
+        MapShip &m = it->second;
+        float dt = static_cast<float>(now - m.drivenAt);
+        if (dt > 0.5f)
+            dt = 0.5f;
+        m.drivenAt = now;
+        double age = now - m.at;
+        if (age > 3.0)
+            age = 3.0;
+        float tx = m.x + m.vx * static_cast<float>(age);
+        float tz = m.z + m.vz * static_cast<float>(age);
+        float x = m.lastX + m.vx * dt;
+        float z = m.lastZ + m.vz * dt;
+        float ex = tx - x, ez = tz - z;
+        if (ex * ex + ez * ez > 30.0f * 30.0f)
+        {
+            x = tx;
+            z = tz;
+        }
+        else
+        {
+            float k = dt * 2.0f;
+            if (k > 1.0f)
+                k = 1.0f;
+            x += ex * k;
+            z += ez * k;
+            float step = std::sqrt(ex * ex + ez * ez) * k;
+            if (step > m.maxStep)
+                m.maxStep = step;
+        }
+        float turn = TurnBetween(m.lastAy, m.ay);
+        float maxTurn = 2.0f * dt; // radians per second
+        if (turn > maxTurn)
+            turn = maxTurn;
+        if (turn < -maxTurn)
+            turn = -maxTurn;
+        float ay = m.lastAy + turn;
+        if (!DriveMapShip(m.ax, m.pos, x, z, ay, m.lastX, m.lastZ, m.key))
+        {
+            Log("map ship %s let go", it->first.c_str());
+            it = g_mapShips.erase(it);
+            continue;
+        }
+        m.lastX = x;
+        m.lastZ = z;
+        m.lastAy = ay;
+        if (!m.label.empty())
+            labels.push_back({x, 0.0f, z, m.label});
+        float off = std::sqrt((tx - x) * (tx - x) + (tz - z) * (tz - z));
+        if (off > m.maxOff)
+            m.maxOff = off;
+        if (now - m.loggedAt > 10.0)
+        {
+            Log("map ship %s: biggest correction in a frame %.3f, biggest gap %.2f (10 s)", it->first.c_str(), m.maxStep,
+                m.maxOff);
+            m.loggedAt = now;
+            m.maxStep = m.maxOff = 0;
+        }
+        ++it;
+    }
+    coopnet::SetMapLabels(labels, meX, meZ);
+    return Return(s, static_cast<long>(g_mapShips.size()));
+}
+
+// int CoopNet_MapShipLabel(string enc, string text)  a name drawn under a driven ship on the map
+DWORD __cdecl N_MapShipLabel(VS_STACK *s)
+{
+    std::string text = ArgString(Pop(s));
+    std::string enc = ArgString(Pop(s));
+    auto it = g_mapShips.find(enc);
+    if (it == g_mapShips.end())
+        return Return(s, 0L);
+    it->second.label = text;
+    return Return(s, 1L);
+}
+
+// int CoopNet_MapShipForget(string enc)  stops driving that ship ("": all of them, the map is gone)
+DWORD __cdecl N_MapShipForget(VS_STACK *s)
+{
+    std::string enc = ArgString(Pop(s));
+    if (enc.empty())
+        g_mapShips.clear();
+    else
+        g_mapShips.erase(enc);
+    return Return(s, 1L);
+}
+
+// int CoopNet_TestKey(int vk, int down)  test runs only: holds a key down or lets it go
+DWORD __cdecl N_TestKey(VS_STACK *s)
+{
+    long down = GetLong(Pop(s));
+    long vk = GetLong(Pop(s));
+    if (vk < 0 || vk >= 256)
+        return Return(s, 0L);
+    g_testKeys[vk] = down != 0;
+    return Return(s, 1L);
+}
+
 // int CoopNet_Send(int to, int reliable)  to: peer id, 0 = host, -1 = everyone
 DWORD __cdecl N_Send(VS_STACK *s)
 {
@@ -1181,6 +1526,12 @@ const Native kNatives[] = {
     {"CoopNet_Seconds", "float", 0, N_Seconds},
     {"CoopNet_Invite", "int", 0, N_Invite},
     {"CoopNet_MyUid", "string", 0, N_MyUid},
+    {"CoopNet_TestKey", "int", 2, N_TestKey},
+    {"CoopNet_MapShipBind", "int", 4, N_MapShipBind},
+    {"CoopNet_MapShipSet", "int", 6, N_MapShipSet},
+    {"CoopNet_MapShipDrive", "int", 2, N_MapShipDrive},
+    {"CoopNet_MapShipForget", "int", 1, N_MapShipForget},
+    {"CoopNet_MapShipLabel", "int", 2, N_MapShipLabel},
     {"CoopNet_RollbackSave", "string", 1, N_RollbackSave},
     {"CoopNet_SaveLoaded", "int", 1, N_SaveLoaded},
 };
@@ -1221,6 +1572,11 @@ VMA *g_moduleClassRoot = nullptr;
 COOPNETvmacd g_coopnetClass(g_moduleClassRoot);
 
 } // namespace
+
+void coopnet::LogLine(const char *line)
+{
+    Log("%s", line);
+}
 
 #ifndef COOPNET_STEAM
 // Built without the Steamworks SDK (CoopMod/steamworks_sdk is not in git): UDP only.

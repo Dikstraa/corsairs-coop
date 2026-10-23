@@ -49,6 +49,9 @@
 #define COOPNET_LAND_PEOPLE_STALE	1.6	// seconds without news before a person is gone
 #define COOPNET_LAND_LEAD		0.5		// seconds ahead a puppet runs to
 #define COOPNET_LAND_JUMP		6.0		// metres behind before a puppet is put in place
+#define COOPNET_LAND_CATCH_UP	2.0		// metres behind before a puppet runs to catch up
+#define COOPNET_LAND_JUMP_MAX	15.0		// metres behind a running puppet may get at most
+#define COOPNET_LAND_TELEPORT	15.0		// metres per second: faster is a teleport, not a run
 #define COOPNET_LAND_RUN		2.5		// metres per second: faster runs, slower walks
 #define COOPNET_LAND_STILL		0.3		// metres per second: slower stands
 #define COOPNET_LAND_NEAR		0.5		// metres: a standing puppet this close stays put
@@ -72,6 +75,7 @@ bool bCoopNetLandGroups = false;	// the puppet groups are set up in this locatio
 float fCoopNetLandLogAt = 0.0;
 int iCoopNetLandList[64];			// characters picked from LAi_loginedcharacters
 int iCoopNetLandListNum = 0;
+int iCoopNetLandJumps = 0;			// puppets put in place since the last log line (each one a visible jump)
 
 void CoopNet_LandTick()
 {
@@ -693,6 +697,13 @@ void CoopNet_LandSteer(aref arP)
 	float fVX = stf(arP.vx);
 	float fVZ = stf(arP.vz);
 	float fSpeed = sqrt(fVX * fVX + fVZ * fVZ);
+	if (fSpeed > COOPNET_LAND_TELEPORT)
+	{
+		// nobody runs that fast: the real one was moved (a door, a script), it stands there now
+		fVX = 0.0;
+		fVZ = 0.0;
+		fSpeed = 0.0;
+	}
 	float fGX = stf(arP.x) + fVX * (fAge + COOPNET_LAND_LEAD);
 	float fGZ = stf(arP.z) + fVZ * (fAge + COOPNET_LAND_LEAD);
 	float fY = stf(arP.y);
@@ -701,11 +712,19 @@ void CoopNet_LandSteer(aref arP)
 	float fCY = 0.0;
 	float fZ = 0.0;
 	if (SendMessage(rChr, "leee", MSG_CHARACTER_GETPOS, &fX, &fCY, &fZ) == 0) return;
-	float fDX = stf(arP.x) - fX;
-	float fDZ = stf(arP.z) - fZ;
+	// how far behind where the real one is now (the report carried forward)
+	float fNowX = stf(arP.x) + fVX * fAge;
+	float fNowZ = stf(arP.z) + fVZ * fAge;
+	float fDX = fNowX - fX;
+	float fDZ = fNowZ - fZ;
 	float fBehind = sqrt(fDX * fDX + fDZ * fDZ);
-	if (fBehind > COOPNET_LAND_JUMP)
+	// a runner may lag a little more: a second behind looks better than a jump
+	float fJump = COOPNET_LAND_JUMP + fSpeed * 1.5;
+	if (fJump > COOPNET_LAND_JUMP_MAX) fJump = COOPNET_LAND_JUMP_MAX;
+	if (fBehind > fJump)
 	{
+		iCoopNetLandJumps++;
+		CoopNet_Log("land: " + rChr.id + " put in place, " + fBehind + " behind at speed " + fSpeed + ", report " + fAge + " s old");
 		TeleportCharacterToPosAy(rChr, stf(arP.x), fY, stf(arP.z), stf(arP.ay));
 		SetCharacterTask_Stay(rChr);
 		return;
@@ -714,7 +733,9 @@ void CoopNet_LandSteer(aref arP)
 	{
 		if (fBehind > COOPNET_LAND_NEAR)
 		{
-			SendMessage(rChr, "lsfff", MSG_NPCHARACTER_SETTASK, "Goto point", stf(arP.x), fY, stf(arP.z));
+			string sTo = "Goto point";
+			if (fBehind > COOPNET_LAND_CATCH_UP) sTo = "Runto point";
+			SendMessage(rChr, "lsfff", MSG_NPCHARACTER_SETTASK, sTo, stf(arP.x), fY, stf(arP.z));
 		}
 		else
 		{
@@ -723,7 +744,7 @@ void CoopNet_LandSteer(aref arP)
 		return;
 	}
 	string sTask = "Goto point";
-	if (fSpeed > COOPNET_LAND_RUN) sTask = "Runto point";
+	if (fSpeed > COOPNET_LAND_RUN || fBehind > COOPNET_LAND_CATCH_UP) sTask = "Runto point"; // a walker that fell behind runs
 	SendMessage(rChr, "lsfff", MSG_NPCHARACTER_SETTASK, sTask, fGX, fY, fGZ);
 }
 
@@ -772,7 +793,8 @@ void CoopNet_LandLog()
 	aref arHidden;
 	makearef(arHidden, CoopNetLandHidden);
 	fCoopNetLandLogAt = CoopNet_Seconds() + 10.0;
-	CoopNet_Log("land: me in " + CoopNet_LandHere() + ", owner " + bCoopNetLandOwner + ", " + GetAttributesNum(arHidden) + " of ours aside, " + iShown + " of theirs shown (" + iDead + " dead, worst " + fWorst + " off)" + sLine);
+	CoopNet_Log("land: me in " + CoopNet_LandHere() + ", owner " + bCoopNetLandOwner + ", " + GetAttributesNum(arHidden) + " of ours aside, " + iShown + " of theirs shown (" + iDead + " dead, worst " + fWorst + " off), " + iCoopNetLandJumps + " jumps" + sLine);
+	iCoopNetLandJumps = 0;
 }
 
 // ---- extra fields: what a puppet needs to fight like the real one --------------------------------
@@ -1187,7 +1209,11 @@ void CoopNet_TestLand()
 	}
 	if (CoopNet_LandHere() == "" || iCoopNetLandTicks != 0) return;
 	iCoopNetLandTestStep++;
-	if (iCoopNetLandTestStep == 1) CoopNet_TestLandOfficer();
+	if (iCoopNetLandTestStep == 1)
+	{
+		LAi_SetHP(pchar, 1000.0, 1000.0); // the test hero (no creation) would die of the first blows
+		CoopNet_TestLandOfficer();
+	}
 	int iStep = iCoopNetLandTestStep - 40;
 	if (iStep < 0) return;
 	float fX = 0.0;

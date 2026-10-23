@@ -32,6 +32,7 @@ float fCoopNetSpeedFromZ = 0.0;
 float fCoopNetSpeedFromAt = -1.0;
 bool bCoopNetAvatarsReady = false;	// stale avatars purged since the map was opened
 float fCoopNetMapOpenedAt = 0.0;	// CoopNet_Seconds when the world map last opened
+int iCoopNetMapShipKeys = 0;			// avatars made so far: each gets its own speed, by which CoopNet.dll finds it
 
 void CoopNet_PresenceTick()
 {
@@ -271,6 +272,22 @@ void CoopNet_AvatarSync(aref arP)
 	if (CheckAttribute(arP, "enc"))
 	{
 		string sEnc = arP.enc;
+		// a ship CoopNet.dll drives just gets told where the player is (from the report: the DLL
+		// carries it forward with the speed every frame)
+		if (CheckAttribute(arP, "encDriven") && sti(arP.encDriven))
+		{
+			if (!CoopNet_MapShipAlive(sEnc))
+			{
+				// something else is deleting it: let go first, the map frees it after the fade
+				CoopNet_MapShipForget(sEnc);
+				CoopNet_AvatarRemove(arP);
+				return;
+			}
+			CoopNet_MapShipLabel(sEnc, CoopNet_AvatarLabel(arP));
+			if (CoopNet_MapShipSet(sEnc, stf(arP.x), stf(arP.z), fVX, fVZ, stf(arP.ay)) != 0) return;
+			CoopNet_Log("avatar: " + sEnc + " no longer driven, made anew");
+			arP.encDriven = false;
+		}
 		bool bRecreate = true;
 		// a new encounter gets its position when the map runs next (not while a dialog holds it)
 		if (CheckAttribute(&worldMap, "encounters." + sEnc) && !CheckAttribute(&worldMap, "encounters." + sEnc + ".x")) return;
@@ -317,13 +334,33 @@ void CoopNet_AvatarCreate(aref arP, float fX, float fZ, float fVX, float fVZ, fl
 		fGoZ = fZ + cos(fAY) * 1000.0;
 		fK = 0.0001;
 	}
-	SendMessage(&worldMap, "lsffffff", MSG_WORLDMAP_CREATEENC_MER_XZ, "ship", fStartX, fStartZ, fGoX, fGoZ, fK, 100000.0);
+	// a speed no other ship has, by which CoopNet.dll finds this one in memory and drives it
+	iCoopNetMapShipKeys++;
+	float fKey = 0.1 + 0.00013 * (1 + iCoopNetMapShipKeys - (iCoopNetMapShipKeys / 3000) * 3000);
+	// its goal far off (the map clamps it to the edge): a merchant that arrives is deleted
+	SendMessage(&worldMap, "lsffffff", MSG_WORLDMAP_CREATEENC_MER_XZ, "ship", fX, fZ, fX + 100000.0, fZ + 100000.0, fKey, 100000.0);
 	string sEnc = worldMap.EncounterID1;
 	worldMap.encounters.(sEnc).coopAvatar = arP.id;
 	arP.enc = sEnc;
 	arP.encMoving = bMoving;
 	arP.encVX = fVX;
 	arP.encVZ = fVZ;
+	arP.encDriven = false;
+	if (CoopNet_MapShipBind(sEnc, fKey, fX, fZ) != 0)
+	{
+		arP.encDriven = true;
+		CoopNet_MapShipSet(sEnc, fX, fZ, fVX, fVZ, stf(arP.ay));
+		CoopNet_MapShipLabel(sEnc, CoopNet_AvatarLabel(arP)); // the player's name under its ship
+		CoopNet_Log("avatar: player " + arP.id + " as " + sEnc + " at " + fX + " " + fZ + ", driven");
+		return;
+	}
+	// not found: an ordinary merchant on the player's course, made anew when it drifts off
+	DeleteAttribute(&worldMap, "encounters." + sEnc + ".coopAvatar");
+	CoopNet_DeleteEncounter(sEnc);
+	SendMessage(&worldMap, "lsffffff", MSG_WORLDMAP_CREATEENC_MER_XZ, "ship", fStartX, fStartZ, fGoX, fGoZ, fK, 100000.0);
+	sEnc = worldMap.EncounterID1;
+	worldMap.encounters.(sEnc).coopAvatar = arP.id;
+	arP.enc = sEnc;
 	CoopNet_Log("avatar: player " + arP.id + " as " + sEnc + " at " + fStartX + " " + fStartZ + ", speed " + fSpeed);
 }
 
@@ -332,6 +369,8 @@ void CoopNet_AvatarRemove(aref arP)
 	if (!CheckAttribute(arP, "enc")) return;
 	string sEnc = arP.enc;
 	DeleteAttribute(arP, "enc");
+	DeleteAttribute(arP, "encDriven");
+	CoopNet_MapShipForget(sEnc);
 	if (IsEntity(&worldMap)) CoopNet_DeleteEncounter(sEnc);
 }
 
@@ -339,6 +378,7 @@ void CoopNet_AvatarRemove(aref arP)
 // attributes must stay till then (the map drops them itself when it opens next, as the game does).
 void CoopNet_DeleteEncounter(string sEnc)
 {
+	CoopNet_MapShipForget(sEnc); // CoopNet.dll lets go of it before the map frees it
 	if (!CheckAttribute(&worldMap, "encounters." + sEnc)) return;
 	if (!IsEntity(&worldMap))
 	{
@@ -351,6 +391,7 @@ void CoopNet_DeleteEncounter(string sEnc)
 
 void CoopNet_ForgetAvatarIds()
 {
+	CoopNet_MapShipForget(""); // the map and its ships are gone
 	aref arPlayers;
 	makearef(arPlayers, CoopNetPlayers);
 	int iNum = GetAttributesNum(arPlayers);
@@ -358,6 +399,7 @@ void CoopNet_ForgetAvatarIds()
 	{
 		aref arP = GetAttributeN(arPlayers, i);
 		DeleteAttribute(arP, "enc");
+		DeleteAttribute(arP, "encDriven");
 	}
 }
 
@@ -381,4 +423,44 @@ bool CoopNet_IsAvatarEncounter(int iIndex)
 	if (!wdmSetCurrentShipData(iIndex)) return false;
 	string sEnc = worldMap.encounter.id;
 	return CheckAttribute(&worldMap, "encounters." + sEnc + ".coopAvatar");
+}
+
+// For the status log: how far the avatar is from where its player is now (", off D"), "" without one.
+string CoopNet_AvatarOff(aref arP)
+{
+	if (!IsEntity(&worldMap) || !CheckAttribute(arP, "enc")) return "";
+	string sEnc = arP.enc;
+	if (!CheckAttribute(&worldMap, "encounters." + sEnc + ".x")) return ", not placed yet";
+	float fAge = CoopNet_Seconds() - stf(arP.at);
+	if (fAge > COOPNET_AVATAR_MAX_GUESS) fAge = COOPNET_AVATAR_MAX_GUESS;
+	float fX = stf(arP.x) + stf(arP.vx) * fAge;
+	float fZ = stf(arP.z) + stf(arP.vz) * fAge;
+	float fDX = fX - stf(worldMap.encounters.(sEnc).x);
+	float fDZ = fZ - stf(worldMap.encounters.(sEnc).z);
+	return ", off " + sqrt(fDX * fDX + fDZ * fDZ) + " at speed " + sqrt(stf(arP.vx) * stf(arP.vx) + stf(arP.vz) * stf(arP.vz));
+}
+
+// A ship CoopNet.dll drives must be let go before the map frees it. The map frees an encounter after
+// its needDelete fade, or when it reports killMe (its life or its goal reached: driven ships get a
+// long life and a goal far away).
+bool CoopNet_MapShipAlive(string sEnc)
+{
+	if (!CheckAttribute(&worldMap, "encounters." + sEnc)) return false;
+	if (CheckAttribute(&worldMap, "encounters." + sEnc + ".needDelete")) return false;
+	if (CheckAttribute(&worldMap, "encounters." + sEnc + ".killMe"))
+	{
+		if (sti(worldMap.encounters.(sEnc).killMe) != 0) return false;
+	}
+	return true;
+}
+
+// The name under a player's ship on the map, with where it is when it is not on the map itself (its
+// ship then stays where it left the map, so it can still be found there).
+string CoopNet_AvatarLabel(aref arP)
+{
+	string sLabel = arP.name;
+	int iMode = sti(arP.mode);
+	if (iMode == COOPNET_MODE_LAND) sLabel = sLabel + " (на суше)";
+	if (iMode == COOPNET_MODE_SEA) sLabel = sLabel + " (в море)";
+	return sLabel;
 }

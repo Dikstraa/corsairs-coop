@@ -55,15 +55,41 @@ time, since posted events stop while the Esc menu pauses the game.
 (location id) twice a second; the host sends the whole table to everybody. On the world map each
 other player is shown as a ship (a merchant-type encounter marked `coopAvatar`).
 
-WorldMap.dll treats encounter attributes as output only: writing `x`/`gotox` changes nothing, and an
-encounter can only be created (`MSG_WORLDMAP_CREATEENC_MER_XZ`) or deleted (`needDelete` +
-`worldMap.deleteUpdate = ""`). So an avatar is created slightly ahead of the player along its course
-(encounters start from a standstill) and re-created when it drifts more than 20 map units from
-where the player is now (its last report carried forward with the speed it measured itself; the
-receiver can't measure it, reports arrive unevenly) or the course turns by more than ~35°. A parked
-player is a ship crawling at kSpeed 0.0001. Running into an avatar doesn't start a battle
-(`wdmEvent_ShipEncounter`, `INTERFACE/map.c` skip it); leftovers from an earlier visit are purged
-when the map opens.
+WorldMap.dll treats encounter attributes as output only: a ship reads its position and heading once,
+when it is made (`WdmEnemyShip::SetSaveAttribute`), and gets a random heading
+(`CreateMerchantShipXZ`: `Teleport(x, z, rand())`, speed clamped to at least 0.1). Steering one from
+the script means making it again and again: a jump, a turn, and the old one fading out next to it
+(the "copies everywhere"). So CoopNet.dll drives the ships itself (`CoopNet_MapShip*`):
+
+- an avatar (and a mirror of another player's NPC ship) is created with a kSpeed no other ship has
+  (0.1 + n * 0.00013), a goal far off and a long life; the DLL finds that float in memory and checks
+  the WdmShip layout around it (`ax, ay, az, dltAx, dltAz, speed, turnspd, baseV, kMaxSpeed` in a
+  row, the matrix row `x, 0, z, 1` a little before). Ships come from the same heap, so after the
+  first find (~150 ms) the next ones take no time;
+- every frame (`CoopNet_MapShipDrive` from the frame handler) it writes the position and heading
+  there and keeps the ship's own speed and turning at 0. The position sails on with the reported
+  speed and closes the gap to the report over ~0.5 s (jumps only beyond 30 units); the heading
+  turns at 2 rad/s at most. Reads and writes are guarded, and a ship whose matrix or zeroed speed
+  isn't as left is dropped, never written;
+- a ship must be let go before the map frees it: every deletion goes through
+  `CoopNet_DeleteEncounter`, which lets go first, and a ship whose record shows `needDelete` or
+  `killMe` is let go too. When the DLL can't find a ship the old way (made anew when it drifts) is
+  used.
+
+Measured (`run_pair.ps1 -NewGame -ToMap`, the host sailing about with keys held through
+`CoopNet_TestKey`): one avatar per player for the whole run instead of 17 re-creations in 80 s,
+0.4-3 map units off, at most 0.08 units of correction in a frame; NPC mirrors no longer re-created.
+
+Names: the DLL also draws each player's name under its ship (`map_labels.cpp`): the device's
+EndScene, SetTransform and Reset are redirected (every device here has a table of its own, so the
+game's table is found by the functions in it), the map camera is the one of the 3D scene (the map is
+drawn around the camera, so the object nearest the middle of the view is taken as the player's own
+ship and the others are placed from it), and the name is drawn with d3dx9_43.dll's font. A player
+off the screen is shown at its edge with an arrow toward it; a player ashore or at sea keeps its ship
+where it left the map, named "(на суше)" / "(в море)".
+
+Running into an avatar doesn't start a battle (`wdmEvent_ShipEncounter`, `INTERFACE/map.c` skip it);
+leftovers from an earlier visit are purged when the map opens.
 
 A new encounter gets its `x`/`z` only when the map runs next, and a deleted one goes only when the
 map runs next and still finds its `needDelete`: its attributes must stay (the map drops them itself
@@ -227,8 +253,11 @@ it on. Locations are the same for everybody, so positions are used as they come.
 
 Another player in the same location is a puppet character `CoopLand_<id>` with that player's model:
 actor type, immortal, no dialog. It runs (`Runto point`) or walks (`Goto point`) to where the player
-will be half a second later, is put in place when it falls more than 6 m behind, turns to the
-player's heading when it stands, and draws its blade with the player. A puppet is sent away
+will be half a second later (running whenever it is more than 2 m behind), is put in place when it
+falls more than 6 m behind (plus 1.5 s of its speed when it runs, 15 m at most; a report faster than
+15 m/s is a teleport, not a run), turns to the player's heading when it stands, and draws its blade
+with the player. Measured: people walk 1.3-2.2 m behind; the only jumps left are the game's own
+teleports of its people. A puppet is sent away
 (`location = "none"`) when its player leaves or this player's location unloads, so the game never
 logs it in again when it loads that location.
 

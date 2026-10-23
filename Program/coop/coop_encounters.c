@@ -296,6 +296,32 @@ void CoopNet_EncSyncMirrors()
 		if (CheckAttribute(arE, "enc"))
 		{
 			string sEnc = arE.enc;
+			if (CheckAttribute(arE, "encDriven") && sti(arE.encDriven))
+			{
+				// CoopNet.dll drives it: where the ship is now, and its course to its goal
+				if (CoopNet_MapShipAlive(sEnc))
+				{
+					float fVX = 0.0;
+					float fVZ = 0.0;
+					float fAY = stf(arE.encAY);
+					float fLeft = sqrt((fGX - fX) * (fGX - fX) + (fGZ - fZ) * (fGZ - fZ));
+					if (!bParked && fLeft > 0.5)
+					{
+						fVX = (fGX - fX) / fLeft * stf(arE.speed);
+						fVZ = (fGZ - fZ) / fLeft * stf(arE.speed);
+						fAY = atan2(fGX - fX, fGZ - fZ);
+						arE.encAY = fAY;
+					}
+					if (CoopNet_MapShipSet(sEnc, fX, fZ, fVX, fVZ, fAY) != 0) continue;
+				}
+				CoopNet_Log("enc: " + sEnc + " (" + arE.gid + ") no longer driven, made anew");
+				arE.encDriven = false;
+				DeleteAttribute(arE, "enc");
+				CoopNet_DeleteEncounter(sEnc);
+				iCoopNetEncRecreated++;
+				CoopNet_EncCreateMirror(arE, fX, fZ, bParked);
+				continue;
+			}
 			if (!CheckAttribute(&worldMap, "encounters." + sEnc + ".x")) continue; // placed next frame
 			float fEX = fX - stf(worldMap.encounters.(sEnc).x);
 			float fEZ = fZ - stf(worldMap.encounters.(sEnc).z);
@@ -348,9 +374,39 @@ void CoopNet_EncCreateMirror(aref arE, float fX, float fZ, bool bParked)
 		fStartZ = fZ + fDZ / fDist * fLead;
 	}
 	string sModel = arE.model;
-	if (!SendMessage(&worldMap, "lsffffff", MSG_WORLDMAP_CREATEENC_MER_XZ, sModel, fStartX, fStartZ, fGX, fGZ, fK, stf(arE.life))) return;
-	string sEnc = worldMap.EncounterID1;
-	if (sEnc == "") return;
+	// first as a ship CoopNet.dll drives: made where the ship is now, with a speed no other ship has
+	// (by which the DLL finds it), a long life and a goal far off (the owner's word deletes it)
+	arE.encDriven = false;
+	iCoopNetMapShipKeys++;
+	float fKey = 0.1 + 0.00013 * (1 + iCoopNetMapShipKeys - (iCoopNetMapShipKeys / 3000) * 3000);
+	string sEnc = "";
+	if (SendMessage(&worldMap, "lsffffff", MSG_WORLDMAP_CREATEENC_MER_XZ, sModel, fX, fZ, fX + 100000.0, fZ + 100000.0, fKey, 100000.0))
+	{
+		sEnc = worldMap.EncounterID1;
+		if (sEnc != "")
+		{
+			if (CoopNet_MapShipBind(sEnc, fKey, fX, fZ) != 0)
+			{
+				arE.encDriven = true;
+				arE.encAY = 0.0;
+				if (fDist > 0.5) arE.encAY = atan2(fDX, fDZ);
+				fStartX = fX;
+				fStartZ = fZ;
+			}
+			else
+			{
+				CoopNet_DeleteEncounter(sEnc);
+				sEnc = "";
+			}
+		}
+	}
+	if (sEnc == "")
+	{
+		// not found: an ordinary merchant on the ship's course, made anew when it drifts off
+		if (!SendMessage(&worldMap, "lsffffff", MSG_WORLDMAP_CREATEENC_MER_XZ, sModel, fStartX, fStartZ, fGX, fGZ, fK, stf(arE.life))) return;
+		sEnc = worldMap.EncounterID1;
+		if (sEnc == "") return;
+	}
 	worldMap.encounters.(sEnc).coopGid = arE.gid;
 	worldMap.encounters.(sEnc).coopMirror = true;
 	worldMap.encounters.(sEnc).encdata = "";

@@ -46,6 +46,12 @@ native int CoopNet_Connect(string host, int port, string name);
 native int CoopNet_Disconnect();
 native int CoopNet_State();
 native int CoopNet_MyId();
+native int CoopNet_TestKey(int vk, int down);
+native int CoopNet_MapShipBind(string enc, float kSpeed, float x, float z);
+native int CoopNet_MapShipSet(string enc, float x, float z, float vx, float vz, float ay);
+native int CoopNet_MapShipDrive(float meX, float meZ);
+native int CoopNet_MapShipForget(string enc);
+native int CoopNet_MapShipLabel(string enc, string text);
 native int CoopNet_PeerCount();
 native int CoopNet_PeerId(int index);
 native string CoopNet_PeerName(int id);
@@ -266,8 +272,8 @@ void CoopNet_LogTree(aref arRoot, string sPrefix)
 	}
 }
 
-// COOPNET_TOMAP=1: goes to the world map once in the game; the host then jumps 40 map units every
-// 5 s (through playerShipUpdate) so the client's avatar of it has something to follow.
+// COOPNET_TOMAP=1: goes to the world map once in the game; the host then sails about after ~25 s (keys held through
+// CoopNet_TestKey: the map ignores position writes) so the client's avatar of it has something to follow.
 void CoopNet_TestMap()
 {
 	if (iCoopNetTestMapTicks < 0 || CoopNet_GetEnv("COOPNET_TOMAP") != "1") return;
@@ -299,11 +305,23 @@ void CoopNet_TestMap()
 	}
 	if (CoopNet_GetEnv("COOPNET_TOSEA") == "1") CoopNet_TestSea();
 	if (!IsEntity(&worldMap) || CoopNet_State() != COOPNET_HOSTING) return;
-	if (iCoopNetTestMapTicks - (iCoopNetTestMapTicks / 100) * 100 != 0 || iCoopNetTestMapTicks > 1000) return;
-	float fX = stf(worldMap.playerShipX) + 40.0;
-	worldMap.playerShipX = fX;
-	worldMap.playerShipUpdate = "";
-	CoopNet_Log("test: host jumps to x " + fX + ", map says " + worldMap.playerShipX);
+	if (CoopNet_GetEnv("COOPNET_TOSEA") == "1") return;
+	// the host sails about as a player would: sails up (W held 2 s), then a turn to the left (A held 1 s)
+	// every 10 s, so the client's avatar of it has a moving, turning ship to follow
+	int iT = iCoopNetTestMapTicks;
+	if (iT == 600)
+	{
+		CoopNet_TestKey(87, 1);
+		CoopNet_Log("test: host sets sail on the map at " + worldMap.playerShipX + " " + worldMap.playerShipZ);
+	}
+	if (iT == 640) CoopNet_TestKey(87, 0);
+	int iPhase = iT - (iT / 200) * 200;
+	if (iT > 650 && iPhase == 0) CoopNet_TestKey(65, 1);
+	if (iT > 650 && iPhase == 20)
+	{
+		CoopNet_TestKey(65, 0);
+		CoopNet_Log("test: host turned, now at " + worldMap.playerShipX + " " + worldMap.playerShipZ + " heading " + worldMap.playerShipAY);
+	}
 }
 
 // COOPNET_TOSEA=1 (with COOPNET_TOMAP): ~10 s on the map both leave it for the sea (with COOPNET_SEAJOIN=1 only\r\n// the host; the client stays by the host's avatar and so joins it at sea), the client 2 map units
@@ -525,7 +543,7 @@ void CoopNet_LogStatus()
 		if (sti(arP.id) == CoopNet_MyId()) continue;
 		sLine = sLine + "; player " + arP.id + " '" + arP.name + "' mode " + arP.mode + " in '" + arP.place + "'";
 		if (sti(arP.hasMap)) sLine = sLine + " map " + arP.x + " " + arP.z;
-		if (CheckAttribute(arP, "enc")) sLine = sLine + " avatar " + arP.enc;
+		if (CheckAttribute(arP, "enc")) sLine = sLine + " avatar " + arP.enc + CoopNet_AvatarOff(arP);
 	}
 	aref arEncs;
 	makearef(arEncs, CoopNetEncs);
@@ -602,6 +620,7 @@ void CoopNet_StartTick()
 void CoopNet_Frame()
 {
 	if (!bCoopNetTicking) return;
+	if (IsEntity(&worldMap)) CoopNet_MapShipDrive(stf(worldMap.playerShipX), stf(worldMap.playerShipZ)); // every frame: other players' ships on the map
 	float fNow = CoopNet_Seconds();
 	if (fNow - fCoopNetLastTick < COOPNET_TICK_MS / 1000.0) return;
 	fCoopNetLastTick = fNow;

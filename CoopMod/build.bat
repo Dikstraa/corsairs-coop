@@ -9,7 +9,7 @@ call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 cd /d "%~dp0"
 if not exist build mkdir build
 
-set SOURCES=src\coopnet.cpp src\udp_session.cpp src\coop_clock.cpp src\coop_vote.cpp
+set SOURCES=src\coopnet.cpp src\udp_session.cpp src\coop_clock.cpp src\coop_vote.cpp src\map_labels.cpp
 set LIBS=user32.lib
 set STEAM_SDK=steamworks_sdk\sdk
 if exist %STEAM_SDK%\public\steam\steam_api.h (

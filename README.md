@@ -52,6 +52,25 @@ The world map keeps its own clock and ignores the time written back to it, so in
 speed (`worldMap.date.hourPerSec`) is steered: the shared pace plus a correction that closes the
 gap to the shared clock within ~10 s. Its natural pace is `pchar.wmtimechange` (default 0.5 h/s).
 
+## Shared world
+
+`Program/coop/coop_world.c`: the host owns the world, every player keeps its own hero and quests.
+Shared so far: store goods (quantity, price drift, trade type), colony owners and the relations
+between nations. Personal: the Caiman colony, its warehouse and the ship-to-ship store.
+
+- On every game start (new game or load) a client asks the host for its whole world and takes it
+  as is; its own changes are only sent after that.
+- Each player keeps a text snapshot per entry (`s<store>`, `c<colony>`, `r`) and checks a few
+  entries per tick. An entry that no longer matches its snapshot was changed here (trade, capture,
+  the host's daily update) and goes out: from a client to the host, from the host to everybody.
+  The host applies a client's change and passes it on, so the last change wins everywhere.
+- Clients skip the daily store update (`UpdateStore`, `ChangeImport`): it comes from the host.
+- A changed colony owner is applied with `SetCaptureTownByNation` (mayor, garrison, map flag), keeping
+  the player's deposits. A colony a player takes for itself shows up for the others as a pirate one.
+
+`run_pair.ps1 -NewGame -TestWorld`: the host changes a store and a colony owner, the client another
+store; both log what they see.
+
 ## Script API
 
 ```c

@@ -5,7 +5,8 @@
 # During a session CoopNet.dll keeps both windows running even when they are not active.
 # -TestSkip: the host sleeps 8 hours in game, the client agrees to the vote by itself.
 # -ToMap: both go to the world map once in the game.
-param([int]$Seconds = 60, [switch]$NewGame, [switch]$TestSkip, [switch]$ToMap, [switch]$Keep)
+# -TestWorld: the host and the client each change the shared world and log what they see.
+param([int]$Seconds = 60, [switch]$NewGame, [switch]$TestSkip, [switch]$ToMap, [switch]$TestWorld, [switch]$Keep)
 
 $game = Split-Path $PSScriptRoot -Parent
 $dev2 = Join-Path $game 'Maelstrom_dev2.exe'
@@ -29,6 +30,7 @@ Remove-Item (Join-Path $game 'coopnet.log'), (Join-Path $game 'error.log') -Erro
 
 if ($NewGame) { $env:COOPNET_NEWGAME = '1' }
 if ($ToMap) { $env:COOPNET_TOMAP = '1' } # both instances press "New game" in the main menu
+if ($TestWorld) { $env:COOPNET_TESTWORLD = '1' }
 $env:COOPNET_TEST = 'host'
 if ($TestSkip) { $env:COOPNET_TESTSKIP = '1' }
 $hostProc = Start-Process (Join-Path $game 'Maelstrom.exe') -WorkingDirectory $game -PassThru
@@ -37,7 +39,7 @@ $env:COOPNET_TEST = 'client'
 Remove-Item Env:COOPNET_TESTSKIP -ErrorAction SilentlyContinue
 if ($TestSkip) { $env:COOPNET_AUTOVOTE = '1' }
 $clientProc = Start-Process $dev2 -WorkingDirectory $game -PassThru
-Remove-Item Env:COOPNET_TEST, Env:COOPNET_NEWGAME, Env:COOPNET_AUTOVOTE, Env:COOPNET_TOMAP -ErrorAction SilentlyContinue
+Remove-Item Env:COOPNET_TEST, Env:COOPNET_NEWGAME, Env:COOPNET_AUTOVOTE, Env:COOPNET_TOMAP, Env:COOPNET_TESTWORLD -ErrorAction SilentlyContinue
 
 Write-Host "host pid $($hostProc.Id), client pid $($clientProc.Id); waiting $Seconds s (switch between the windows)"
 Start-Sleep $Seconds

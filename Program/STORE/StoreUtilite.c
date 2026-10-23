@@ -313,6 +313,7 @@ void StoreDayUpdate()
 
 void UpdateStore(ref pStore)
 {
+	if (CoopNet_WorldFollower()) return; // co-op client: the host's stores come over the network
 	if(CheckAttribute(pStore, "StoreHouse"))
 	{
 		return;
@@ -755,6 +756,7 @@ void UpdateSmugglers()
 // <-- ugeen
 void ChangeImport()
 {
+	if (CoopNet_WorldFollower()) return; // co-op client: the host's stores come over the network
 	string goodName;
 	//pRef.StoreSize = "large"; // "small"
 	ref pRef; 

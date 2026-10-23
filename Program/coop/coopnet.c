@@ -237,6 +237,37 @@ void CoopNet_TestSkip()
 	WaitDate("", 0, 0, 0, 8, 0);
 }
 
+int iCoopNetTestWorldTicks = 0;
+
+// COOPNET_TESTWORLD=1: once the world is shared, the host changes store 0 and the owner of colony 0,
+// a client changes store 1; ~45 s later both log what they see.
+void CoopNet_TestWorld()
+{
+	if (iCoopNetTestWorldTicks < 0 || CoopNet_GetEnv("COOPNET_TESTWORLD") != "1") return;
+	if (!bCoopNetWorldInGame) return;
+	int iState = CoopNet_State();
+	if (iState == COOPNET_CONNECTED && !bCoopNetWorldSynced) return;
+	if (iState == COOPNET_HOSTING && CoopNet_PeerCount() == 0) return;
+	iCoopNetTestWorldTicks++;
+	string sGood = Goods[GOOD_POWDER].name;
+	if (iCoopNetTestWorldTicks == 100 && iState == COOPNET_CONNECTED)
+	{
+		CoopNet_Log("test: client sets store 1 " + sGood + " to 22222");
+		Stores[1].Goods.(sGood).Quantity = 22222;
+	}
+	if (iCoopNetTestWorldTicks == 600 && iState == COOPNET_HOSTING)
+	{
+		CoopNet_Log("test: host sets store 0 " + sGood + " to 11111, gives " + Colonies[0].id + " to Spain");
+		Stores[0].Goods.(sGood).Quantity = 11111;
+		SetCaptureTownByNation(Colonies[0].id, SPAIN);
+	}
+	if (iCoopNetTestWorldTicks == 900)
+	{
+		iCoopNetTestWorldTicks = -1;
+		CoopNet_Log("test: store 0 " + sGood + " " + Stores[0].Goods.(sGood).Quantity + ", store 1 " + Stores[1].Goods.(sGood).Quantity + ", " + Colonies[0].id + " nation " + Colonies[0].nation + ", store 5 " + CoopNet_WorldStoreState(5));
+	}
+}
+
 // Logs the shared clock every ~5 s while connected.
 void CoopNet_LogClock()
 {
@@ -266,10 +297,12 @@ void CoopNet_Tick()
 	CoopNet_UpdateStatus();
 	CoopNet_Update();
 	CoopNet_PresenceTick();
+	CoopNet_WorldTick();
 	CoopNet_LogClock();
 	CoopNet_TestNewGame();
 	CoopNet_TestSkip();
 	CoopNet_TestMap();
+	CoopNet_TestWorld();
 	int iType = CoopNet_Recv();
 	while (iType != 0)
 	{
@@ -305,6 +338,7 @@ void CoopNet_OnLocationUnload()
 void CoopNet_OnGameStarted()
 {
 	CoopNet_ClockRestart();
+	CoopNet_WorldGameStarted();
 	CI_CreateAndSetControls("", "CoopVoteYes", CI_GetKeyCode("VK_F8"), 0, false);
 }
 
@@ -463,6 +497,7 @@ void CoopNet_Dispatch(int iType)
 		CoopNet_OnPresence(iFrom);
 		return;
 	}
+	if (CoopNet_WorldDispatch(iType, iFrom)) return;
 
 	if (iType > COOPNET_MSG_TEST_ECHO)
 	{
@@ -476,6 +511,7 @@ void CoopNet_Dispatch(int iType)
 			iId = CoopNet_GetInt();
 			sName = CoopNet_PeerName(COOPNET_HOST_ID);
 			CoopNet_Log("connected to '" + sName + "', my id " + iId);
+			CoopNet_WorldConnected();
 			sText = CoopNet_PeerName(iId);
 			CoopNet_Begin(COOPNET_MSG_TEST_HELLO);
 			CoopNet_PutString("hello from " + sText);
@@ -559,3 +595,4 @@ void CoopNet_Dispatch(int iType)
 }
 
 #include "coop\coop_presence.c"
+#include "coop\coop_world.c"

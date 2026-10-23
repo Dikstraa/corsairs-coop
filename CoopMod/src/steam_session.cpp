@@ -139,6 +139,11 @@ class SteamSession final : public Session
         return true;
     }
 
+    std::string LocalUid() const override
+    {
+        return "steam" + std::to_string(SteamUser()->GetSteamID().ConvertToUint64());
+    }
+
     bool OpenInviteDialog() override
     {
         if (state_ == State::Hosting && lobby_.IsValid())

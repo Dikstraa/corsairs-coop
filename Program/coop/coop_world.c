@@ -32,6 +32,7 @@ void CoopNet_WorldGameStarted()
 	DeleteAttribute(&CoopNetWorld, "");
 	iCoopNetWorldScan = 0;
 	CoopNet_EncWorldStarted();
+	CoopNet_HeroGameStarted();
 	// host: every key differs from the empty snapshots, so the new world goes out to everybody
 	if (CoopNet_State() == COOPNET_CONNECTED) CoopNet_WorldRequest();
 }
@@ -351,6 +352,7 @@ bool CoopNet_WorldDispatch(int iType, int iFrom)
 		bCoopNetWorldSynced = true;
 		CoopNet_Log("world: the host's world has arrived");
 		Log_Info("Кооператив: мир хоста загружен");
+		CoopNet_HeroWorldArrived();
 		return true;
 	}
 	if (iState == COOPNET_CONNECTED && iFrom != COOPNET_HOST_ID) return true;

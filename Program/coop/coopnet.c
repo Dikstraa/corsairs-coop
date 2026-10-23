@@ -84,6 +84,7 @@ native string CoopNet_Config(string key);
 native int CoopNet_SetLocalRate(float gameSecondsPerSecond);
 native float CoopNet_Seconds();
 native int CoopNet_Invite();
+native string CoopNet_MyUid();
 
 #library "COOPNET"
 
@@ -412,6 +413,38 @@ void CoopNet_TestMenu()
 	}
 	if (iCoopNetTestMenuTicks > 300) iCoopNetTestMenuTicks = -1;
 }
+int iCoopNetTestHeroTicks = 0;
+
+// COOPNET_HEROTEST=1 on a client (a newcomer): once its hero is in place it sails to Bridgetown and
+// gets 12345 gold; its hero goes to the host every 15 s here. run_pair.ps1 -TestHero then restarts the
+// client without COOPNET_NEWGAME: as a returning player it starts a game by itself, gets its hero
+// back and logs (COOPNET_HEROBACK=1) what it has.
+void CoopNet_TestHero()
+{
+	if (iCoopNetTestHeroTicks < 0) return;
+	if (CoopNet_State() != COOPNET_CONNECTED || iCoopNetHeroState != 3) return;
+	if (CoopNet_GetEnv("COOPNET_HEROBACK") == "1")
+	{
+		iCoopNetTestHeroTicks++;
+		if (iCoopNetTestHeroTicks < 300) return;
+		iCoopNetTestHeroTicks = -1;
+		CoopNet_Log("test: back with " + pchar.money + " gold in " + pchar.location + ", ship " + RealShips[sti(pchar.Ship.Type)].BaseName);
+		return;
+	}
+	if (CoopNet_GetEnv("COOPNET_HEROTEST") != "1") return;
+	iCoopNetTestHeroTicks++;
+	if (iCoopNetTestHeroTicks == 100)
+	{
+		CoopNet_Log("test: hero goes to Bridgetown");
+		DoReloadCharacterToLocation("Bridgetown_town", "reload", "reload1");
+	}
+	if (iCoopNetTestHeroTicks == 300)
+	{
+		pchar.money = 12345;
+		CoopNet_Log("test: hero gets 12345 gold in " + pchar.location);
+		iCoopNetTestHeroTicks = -1;
+	}
+}
 // COOPNET_TESTSKIP=1: ~10 s into the game this player sleeps 8 hours through WaitDate.
 void CoopNet_TestSkip()
 {
@@ -495,12 +528,14 @@ void CoopNet_Tick()
 	CoopNet_WorldTick();
 	CoopNet_EncTick();
 	CoopNet_SeaTick();
+	CoopNet_HeroTick();
 	CoopNet_LogClock();
 	CoopNet_TestNewGame();
 	CoopNet_TestSkip();
 	CoopNet_TestMap();
 	CoopNet_TestWorld();
 	CoopNet_TestMenu();
+	CoopNet_TestHero();
 	int iType = CoopNet_Recv();
 	while (iType != 0)
 	{
@@ -690,6 +725,7 @@ void CoopNet_Dispatch(int iType)
 	}
 	if (CoopNet_WorldDispatch(iType, iFrom)) return;
 	if (CoopNet_EncDispatch(iType, iFrom)) return;
+	if (CoopNet_HeroDispatch(iType, iFrom)) return;
 	if (iType == COOPNET_MSG_SEA)
 	{
 		CoopNet_OnSea(iFrom);
@@ -730,6 +766,7 @@ void CoopNet_Dispatch(int iType)
 			CoopNet_Log("connected to '" + sName + "', my id " + iId);
 			CoopNet_Notice("Кооператив: подключено к игре " + sName);
 			CoopNet_WorldConnected();
+			CoopNet_HeroConnected();
 			sText = CoopNet_PeerName(iId);
 			CoopNet_Begin(COOPNET_MSG_TEST_HELLO);
 			CoopNet_PutString("hello from " + sText);
@@ -831,3 +868,4 @@ void CoopNet_Dispatch(int iType)
 #include "coop\coop_world.c"
 #include "coop\coop_encounters.c"
 #include "coop\coop_sea.c"
+#include "coop\coop_heroes.c"

@@ -23,7 +23,7 @@ using namespace mael;
 namespace
 {
 
-constexpr long kVersion = 5;
+constexpr long kVersion = 6;
 
 // Message types 10..99 are handled inside the DLL and never reach scripts.
 enum : uint16_t
@@ -202,6 +202,12 @@ DWORD __cdecl N_UseSteam(VS_STACK *s)
 DWORD __cdecl N_Invite(VS_STACK *s)
 {
     return Return(s, static_cast<long>(g_active == g_steam && g_steam && g_steam->OpenInviteDialog()));
+}
+
+// string CoopNet_MyUid()  this player's id across sessions ("steam<SteamID64>", usable as an attribute name), "" without Steam
+DWORD __cdecl N_MyUid(VS_STACK *s)
+{
+    return Return(s, Net().LocalUid());
 }
 
 // int CoopNet_UseUdp()  switch to the direct UDP transport (LAN, VPN, forwarded port)
@@ -943,6 +949,7 @@ const Native kNatives[] = {
     {"CoopNet_SetLocalRate", "int", 1, N_SetLocalRate},
     {"CoopNet_Seconds", "float", 0, N_Seconds},
     {"CoopNet_Invite", "int", 0, N_Invite},
+    {"CoopNet_MyUid", "string", 0, N_MyUid},
 };
 
 class COOPNET : public SCRIPT_LIBRIARY

@@ -75,6 +75,9 @@ class Session
 
     // Opens a way to invite friends (Steam: the overlay's invite dialog); false when there is none.
     virtual bool OpenInviteDialog() { return false; }
+
+    // A stable id of this player across sessions (Steam: "steam<SteamID64>", usable as an attribute name); "" when there is none.
+    virtual std::string LocalUid() const { return std::string(); }
 };
 
 // Optional diagnostics sink for transports (set by the DLL to its coopnet.log).

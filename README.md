@@ -83,6 +83,32 @@ between nations. Personal: the Caiman colony, its warehouse and the ship-to-ship
 `run_pair.ps1 -NewGame -TestWorld`: the host changes a store and a colony owner, the client another
 store; both log what they see.
 
+## Players' heroes kept by the host
+
+`Program/coop/coop_heroes.c`: the host keeps every player's hero, so a returning player goes on
+where it left.
+
+- A player is known by its Steam id (`CoopNet_MyUid`: `steam<SteamID64>`), else by its name.
+- While in the host's world a client sends the host its hero pack every minute: the hero (`pchar`),
+  the characters in its `Fellows` lists (companions, officers, passengers), their `RealShips` entries
+  and its place (land location and locator, else its world map position). Not while the new game
+  still sits in the hero selection cabin.
+- The host keeps the latest pack per player in `CoopNetGuests`, a global object: it is saved with the
+  host's game.
+- On connecting a client asks whether the host keeps its hero. A newcomer creates its hero as usual.
+  A returning player in the main menu starts a game by itself and skips the hero creation; in a game
+  (new or loaded) the kept hero replaces the local one once the host's world is in: characters are
+  found by id or created, ships get new `RealShips` slots, `Ship.Type` and `Fellows` indices are
+  remapped, then the hero is reloaded to its location (or put on the world map where it was).
+- Trees travel as `(depth, name, value)` entries in preorder, 300 per message; the receiver keeps
+  the names of the current path and walks down from the root for every entry.
+
+Quest progress lives mostly in the hero's attributes and comes back with it; quest state kept in
+other characters or global objects of the client's own game does not.
+
+`run_pair.ps1 -NewGame -TestHero`: the client goes to Bridgetown, gets 12345 gold, is restarted and
+comes back with them there.
+
 ## Shared ships on the world map
 
 `Program/coop/coop_encounters.c`: the random ships of the world map (merchants, patrols, pirates,

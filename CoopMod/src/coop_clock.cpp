@@ -100,9 +100,19 @@ double Clock::PaceFor(const std::map<int, PlayerTime> &players)
     {
         if (p.battle)
             return 0;
-        if (p.mode == Mode::Menu || p.rate <= 0)
-            continue; // menus, dialogs (engine time scale 0) and unmeasured players don't hold time back
-        pace = pace <= 0 ? p.rate : std::min(pace, p.rate);
+        if (p.mode == Mode::Menu)
+            continue; // menus and interfaces don't hold time back
+        double rate = p.rate;
+        if (rate <= 0)
+        {
+            // Unmeasured yet (the weather reports only every few game minutes): assume the usual
+            // land/sea pace so a player who just arrived isn't run over. Dialogs stop the engine's
+            // time (scale 0) and are measured as 0 too: they get the same treatment.
+            if (p.mode == Mode::WorldMap)
+                continue;
+            rate = Clock::kDefaultLandPace;
+        }
+        pace = pace <= 0 ? rate : std::min(pace, rate);
     }
     return pace;
 }

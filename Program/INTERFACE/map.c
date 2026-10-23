@@ -138,6 +138,7 @@ void wdmRecalcReloadToSea()
 		if(wdmSetCurrentShipData(i))
 		{
 		   if(MakeInt(worldMap.encounter.select) == 0) continue;
+		   if(CheckAttribute(&worldMap, "encounters." + worldMap.encounter.id + ".coopAvatar")) continue; // coop: another player's ship
 			isShipEncounterType++;
 
 			string encID = worldMap.encounter.id;

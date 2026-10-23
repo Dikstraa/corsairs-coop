@@ -90,6 +90,8 @@ class Clock
 
     // Clients stop extrapolating when the host has been silent this long.
     static constexpr double kStaleAfter = 1.5;
+    // Pace assumed for a player on land/sea whose pace isn't measured yet (measured: ~10 game s/s).
+    static constexpr double kDefaultLandPace = 10.0;
 
   private:
     bool valid_ = false;

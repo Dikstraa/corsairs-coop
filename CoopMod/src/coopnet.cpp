@@ -45,6 +45,7 @@ enum : uint16_t
     kEvtSkipResult = 7, // int approved, int mine, string continuation, string text
     kEvtNotice = 8,     // string text
 };
+constexpr long kClockSourceWorldMap = 1; // CoopNet_ClockEngine sources, see coopnet.c
 constexpr double kClockBroadcastEvery = 0.25;
 constexpr double kPlayerTimeEvery = 0.5;
 
@@ -59,6 +60,7 @@ std::string g_retString; // keeps returned strings alive after the native return
 coopnet::Clock g_clock;
 coopnet::RateMeter g_meter;
 coopnet::PlayerTime g_local;   // this player's mode/battle (from the script tick) and pace
+double g_fixedRate = 0;        // pace reported by scripts for the current mode (world map), 0 = measured
 coopnet::GameDate g_applied;   // date returned by the last CoopNet_ClockEngine
 int g_appliedDaysAhead = 0;    // whole days g_applied is ahead of the engine's date
 uint32_t g_hostEpoch = 0;      // host: clock restarts so far
@@ -411,7 +413,7 @@ DWORD __cdecl N_Update(VS_STACK *s)
 {
     double now = RealNow();
     g_lastUpdate = now;
-    g_local.rate = g_meter.Rate();
+    g_local.rate = g_fixedRate > 0 ? g_fixedRate : g_meter.Rate();
     if (Net().GetState() != coopnet::State::Offline)
         KeepRunningInBackground();
     switch (Net().GetState())
@@ -460,11 +462,22 @@ DWORD __cdecl N_SetStatus(VS_STACK *s)
     bool battle = GetLong(Pop(s)) != 0;
     auto mode = static_cast<coopnet::Mode>(GetLong(Pop(s)));
     if (mode != g_local.mode)
+    {
         g_meter.Reset(); // a new mode has its own pace
+        g_fixedRate = 0;
+    }
     if (mode != g_local.mode || battle != g_local.battle)
         Log("status: mode %d%s", static_cast<int>(mode), battle ? ", battle" : "");
     g_local.mode = mode;
     g_local.battle = battle;
+    return Return(s, 1L);
+}
+
+// int CoopNet_SetLocalRate(float gameSecondsPerSecond)  pace of the current mode when it can't be
+// measured (world map); call after CoopNet_SetStatus
+DWORD __cdecl N_SetLocalRate(VS_STACK *s)
+{
+    g_fixedRate = GetFloat(Pop(s));
     return Return(s, 1L);
 }
 
@@ -481,7 +494,10 @@ DWORD __cdecl N_ClockEngine(VS_STACK *s)
     double now = RealNow();
     coopnet::GameDate engine{static_cast<int>(year), static_cast<int>(month), static_cast<int>(day), hours};
 
-    if (source != 0) // 0: applying the clock on demand (after a skip), not an engine proposal
+    // 0: applying the clock on demand (after a skip). The world map keeps its own clock and ignores
+    // the time we hand back, so its pace is reported by CoopNet_SetLocalRate instead of measured.
+    bool measure = source != 0 && source != kClockSourceWorldMap;
+    if (measure)
         g_meter.Sample(source, hours, now);
     auto state = Net().GetState();
     // The host's world defines the time: start from it once the host is actually in a game.
@@ -495,7 +511,8 @@ DWORD __cdecl N_ClockEngine(VS_STACK *s)
     g_applied = engine;
     if (g_clock.Valid() && (state == coopnet::State::Hosting || state == coopnet::State::Connected))
         g_applied = coopnet::FromSeconds(g_clock.Now(now));
-    g_meter.Applied(g_applied.hours); // also after a skip: the engine steps on from the new time
+    if (source != kClockSourceWorldMap)
+        g_meter.Applied(g_applied.hours); // also after a skip: the engine steps on from the new time
 
     coopnet::GameDate a = g_applied, e = engine;
     a.hours = e.hours = 0;
@@ -910,6 +927,7 @@ const Native kNatives[] = {
     {"CoopNet_UseSteam", "int", 0, N_UseSteam},
     {"CoopNet_UseUdp", "int", 0, N_UseUdp},
     {"CoopNet_Config", "string", 1, N_Config},
+    {"CoopNet_SetLocalRate", "int", 1, N_SetLocalRate},
 };
 
 class COOPNET : public SCRIPT_LIBRIARY

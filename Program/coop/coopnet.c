@@ -81,6 +81,7 @@ native int CoopNet_VoteYes();
 native int CoopNet_UseSteam();
 native int CoopNet_UseUdp();
 native string CoopNet_Config(string key);
+native int CoopNet_SetLocalRate(float gameSecondsPerSecond);
 
 #library "COOPNET"
 
@@ -88,6 +89,7 @@ native string CoopNet_Config(string key);
 
 bool bCoopNetTicking = false;
 bool bCoopNetSteam = false; // Steam transport: keep ticking while offline so accepted invites are noticed
+int iCoopNetMode = 0;       // this player's COOPNET_MODE_*, set by CoopNet_UpdateStatus
 
 void CoopNet_Init()
 {
@@ -114,7 +116,6 @@ void CoopNet_Init()
 		CoopNet_StartTick();
 	}
 	if (sTest == "") CoopNet_StartFromConfig();
-	if (CoopNet_GetEnv("COOPNET_NEWGAME") == "1") PostEvent("CoopNet_TestNewGame", 1000);
 }
 
 // coop.ini next to Maelstrom.exe:
@@ -162,16 +163,15 @@ void CoopNet_StartFromConfig()
 
 int iCoopNetTestMenuSeen = 0;
 
-#event_handler("CoopNet_TestNewGame", "CoopNet_TestNewGame");
-// Presses "New game" once the main menu has been up for a couple of seconds.
+// COOPNET_NEWGAME=1: presses "New game" once the main menu has been up for ~3 s. Runs from the
+// tick (a separately posted event doesn't survive the menu start's ClearEvents).
 void CoopNet_TestNewGame()
 {
-	if (CurrentInterface != INTERFACE_MAINMENU || iCoopNetTestMenuSeen < 3)
-	{
-		if (CurrentInterface == INTERFACE_MAINMENU) iCoopNetTestMenuSeen++;
-		PostEvent("CoopNet_TestNewGame", 1000);
-		return;
-	}
+	if (iCoopNetTestMenuSeen < 0 || CoopNet_GetEnv("COOPNET_NEWGAME") != "1") return;
+	if (CurrentInterface != INTERFACE_MAINMENU) return;
+	iCoopNetTestMenuSeen++;
+	if (iCoopNetTestMenuSeen < 60) return;
+	iCoopNetTestMenuSeen = -1;
 	CoopNet_Log("test: starting a new game");
 	// what IDoExit in INTERFACE/mainmenu.c does
 	InterfaceStates.BackEnvironmentIsCreated = true;
@@ -182,6 +182,48 @@ void CoopNet_TestNewGame()
 
 int iCoopNetClockLogTicks = 0;
 int iCoopNetTestSkipTicks = 0;
+int iCoopNetTestMapTicks = 0;
+
+// Logs an attribute tree (two levels) for exploring engine objects.
+void CoopNet_LogTree(aref arRoot, string sPrefix)
+{
+	int iNum = GetAttributesNum(arRoot);
+	for (int i = 0; i < iNum; i++)
+	{
+		aref arItem = GetAttributeN(arRoot, i);
+		string sName = GetAttributeName(arItem);
+		CoopNet_Log(sPrefix + sName + " = " + GetAttributeValue(arItem));
+		int iSub = GetAttributesNum(arItem);
+		for (int j = 0; j < iSub; j++)
+		{
+			aref arSub = GetAttributeN(arItem, j);
+			CoopNet_Log(sPrefix + "  " + GetAttributeName(arSub) + " = " + GetAttributeValue(arSub));
+		}
+	}
+}
+
+// COOPNET_TOMAP=1: goes to the world map once in the game; the host then jumps 40 map units every
+// 5 s (through playerShipUpdate) so the client's avatar of it has something to follow.
+void CoopNet_TestMap()
+{
+	if (iCoopNetTestMapTicks < 0 || CoopNet_GetEnv("COOPNET_TOMAP") != "1") return;
+	if (!CoopNet_SkipVoting()) return;
+	iCoopNetTestMapTicks++;
+	if (iCoopNetTestMapTicks == 100 && !IsEntity(&worldMap))
+	{
+		if (!CheckAttribute(pchar, "Ship.Pos.x")) { pchar.Ship.Pos.x = 0.0; pchar.Ship.Pos.z = 0.0; }
+		if (!CheckAttribute(pchar, "Ship.Ang.y")) pchar.Ship.Ang.y = 0.0; // the hero selection cabin has no ship angle
+		CoopNet_Log("test: Land_MapLoad from " + pchar.location);
+		Land_MapLoad();
+		return;
+	}
+	if (!IsEntity(&worldMap) || CoopNet_State() != COOPNET_HOSTING) return;
+	if (iCoopNetTestMapTicks - (iCoopNetTestMapTicks / 100) * 100 != 0 || iCoopNetTestMapTicks > 1000) return;
+	float fX = stf(worldMap.playerShipX) + 40.0;
+	worldMap.playerShipX = fX;
+	worldMap.playerShipUpdate = "";
+	CoopNet_Log("test: host jumps to x " + fX + ", map says " + worldMap.playerShipX);
+}
 
 // COOPNET_TESTSKIP=1: ~10 s into the game this player sleeps 8 hours through WaitDate.
 void CoopNet_TestSkip()
@@ -205,19 +247,29 @@ void CoopNet_LogClock()
 	CoopNet_Log("clock " + GetDataYear() + "-" + GetDataMonth() + "-" + GetDataDay() + " " + GetHour() + ":" + GetMinute() + " rate " + fRate);
 }
 
+// Each (re)start bumps the generation; ticks of an older chain end themselves, so a watchdog
+// restart while the old chain is still alive can't multiply the ticks.
+int iCoopNetTickGen = 0;
+
 void CoopNet_StartTick()
 {
 	if (bCoopNetTicking) return;
 	bCoopNetTicking = true;
-	PostEvent("CoopNet_Tick", COOPNET_TICK_MS);
+	iCoopNetTickGen++;
+	PostEvent("CoopNet_Tick", COOPNET_TICK_MS, "l", iCoopNetTickGen);
 }
 
 void CoopNet_Tick()
 {
+	int iGen = GetEventData();
+	if (iGen != iCoopNetTickGen) return;
 	CoopNet_UpdateStatus();
 	CoopNet_Update();
+	CoopNet_PresenceTick();
 	CoopNet_LogClock();
+	CoopNet_TestNewGame();
 	CoopNet_TestSkip();
+	CoopNet_TestMap();
 	int iType = CoopNet_Recv();
 	while (iType != 0)
 	{
@@ -229,7 +281,7 @@ void CoopNet_Tick()
 		bCoopNetTicking = false;
 		return;
 	}
-	PostEvent("CoopNet_Tick", COOPNET_TICK_MS);
+	PostEvent("CoopNet_Tick", COOPNET_TICK_MS, "l", iGen);
 }
 
 // loadedLocation is an unset ref in the main menu, so location presence is tracked by events.
@@ -290,6 +342,10 @@ void CoopNet_UpdateStatus()
 	if (IsEntity(&worldMap))
 	{
 		iMode = COOPNET_MODE_WORLDMAP;
+		iCoopNetMode = iMode;
+		CoopNet_SetStatus(iMode, false);
+		CoopNet_DriveWorldMapClock();
+		return;
 	}
 	else
 	{
@@ -308,7 +364,30 @@ void CoopNet_UpdateStatus()
 		}
 	}
 	if (bAbordageStarted) bBattle = true;
+	iCoopNetMode = iMode;
 	CoopNet_SetStatus(iMode, bBattle);
+}
+
+// The world map runs its own clock (WorldMap.dll ignores the time written back to worldMap.date),
+// so in a session its speed is steered instead: the shared pace plus a correction that closes the
+// gap between the map's clock and the shared one within ~10 s.
+float fCoopNetMapLag = 0.0; // hours the map's clock is behind the shared one (from the time hook)
+
+void CoopNet_DriveWorldMapClock()
+{
+	float fNatural = 0.5; // worldmap_init.c default, game hours per second
+	if (CheckAttribute(pchar, "wmtimechange")) fNatural = stf(pchar.wmtimechange);
+	CoopNet_SetLocalRate(fNatural * 3600.0);
+
+	int iState = CoopNet_State();
+	if (iState != COOPNET_CONNECTED && iState != COOPNET_HOSTING)
+	{
+		worldMap.date.hourPerSec = fNatural;
+		return;
+	}
+	float fSpeed = CoopNet_ClockRate() / 3600.0 + fCoopNetMapLag / 10.0;
+	if (fSpeed < 0.0001) fSpeed = 0.0001; // scripts divide by it
+	worldMap.date.hourPerSec = fSpeed;
 }
 
 // ---- shared clock hooks ----------------------------------------------------
@@ -343,6 +422,7 @@ float CoopNet_TimeHook(float fTime, int iSource)
 
 	float fHours = CoopNet_ClockEngine(GetDataYear(), GetDataMonth(), GetDataDay(), fTime, iSource);
 	int iDaysAhead = CoopNet_ClockDaysAhead();
+	if (iSource == COOPNET_CLOCK_WORLDMAP) fCoopNetMapLag = iDaysAhead * 24.0 + fHours - fTime;
 	if (iDaysAhead != 0)
 	{
 		int iYear = CoopNet_ClockYear();
@@ -377,6 +457,12 @@ void CoopNet_Dispatch(int iType)
 	int iId, iReason, iNum, iPing;
 	float fNum;
 	string sName, sText;
+
+	if (iType == COOPNET_MSG_PRESENCE)
+	{
+		CoopNet_OnPresence(iFrom);
+		return;
+	}
 
 	if (iType > COOPNET_MSG_TEST_ECHO)
 	{
@@ -413,6 +499,7 @@ void CoopNet_Dispatch(int iType)
 			iId = CoopNet_GetInt();
 			iReason = CoopNet_GetInt();
 			CoopNet_Log("peer " + iId + " left, reason " + iReason);
+			CoopNet_DropPlayer(iId);
 		break;
 
 		case COOPNET_EVT_DISCONNECTED:
@@ -470,3 +557,5 @@ void CoopNet_Dispatch(int iType)
 		break;
 	}
 }
+
+#include "coop\coop_presence.c"

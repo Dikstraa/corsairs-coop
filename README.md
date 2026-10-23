@@ -34,6 +34,24 @@ come from an installed copy of the Ship Pack: clone this repo over the game fold
 Steam P2P goes through Valve relays: no port forwarding. Two instances on one PC share a Steam
 account and can't connect to each other over Steam; test those over UDP (`run_pair.ps1`).
 
+## Players on the world map
+
+`Program/coop/coop_presence.c`: every player sends the host its mode, world map position and place
+(location id) twice a second; the host sends the whole table to everybody. On the world map each
+other player is shown as a ship (a merchant-type encounter marked `coopAvatar`).
+
+WorldMap.dll treats encounter attributes as output only: writing `x`/`gotox` changes nothing, and an
+encounter can only be created (`MSG_WORLDMAP_CREATEENC_MER_XZ`) or deleted (`needDelete` +
+`worldMap.deleteUpdate = ""`). So an avatar is created slightly ahead of the player along its course
+(encounters start from a standstill) and re-created when it drifts more than 20 map units or the
+course turns by more than ~35°. A parked player is a ship crawling at kSpeed 0.0001. Running into
+an avatar doesn't start a battle (`wdmEvent_ShipEncounter`, `INTERFACE/map.c` skip it); leftovers
+from an earlier visit are purged when the map opens.
+
+The world map keeps its own clock and ignores the time written back to it, so in a session its
+speed (`worldMap.date.hourPerSec`) is steered: the shared pace plus a correction that closes the
+gap to the shared clock within ~10 s. Its natural pace is `pchar.wmtimechange` (default 0.5 h/s).
+
 ## Script API
 
 ```c

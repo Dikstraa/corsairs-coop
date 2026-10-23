@@ -61,7 +61,8 @@ int main()
     p[2] = {Mode::Menu, false, 10};
     CHECK(Clock::PaceFor(p) == 350); // menus don't hold time back
     p[3] = {Mode::Land, false, 0};
-    CHECK(Clock::PaceFor(p) == 350); // dialog (time scale 0) doesn't either
+    CHECK(Clock::PaceFor(p) == Clock::kDefaultLandPace); // unmeasured land player: usual land pace
+    p.erase(3);
     p[1].battle = true;
     CHECK(Clock::PaceFor(p) == 0); // battle stops everyone
 

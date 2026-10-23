@@ -261,6 +261,7 @@ void CoopNet_TestSea()
 			CoopNet_Log("test: client fires a broadside");
 			Ship_DoFire();
 		}
+		if (iCoopNetTestMapTicks == 700 && CoopNet_State() == COOPNET_CONNECTED) CoopNet_TestCrewSails();
 		if (iCoopNetTestMapTicks == 750 && CoopNet_State() == COOPNET_HOSTING) CoopNet_TestAttack();
 		if (iCoopNetTestMapTicks == 800 && CoopNet_State() == COOPNET_CONNECTED) CoopNet_TestAttack();
 	}
@@ -323,6 +324,23 @@ void CoopNet_TestAttack()
 		if (sti(arS.flags) != COOPNET_SEA_FLAGSHIP || !sti(arS.inSea)) continue;
 		CoopNet_Log("test: companion hits " + Characters[sti(arS.chr)].id + " for 500");
 		Ship_ApplyHullHitpoints(&Characters[sti(arS.chr)], 500.0, KILL_BY_BALL, iMate);
+	}
+}
+// COOPNET_SEAFLAGS=1 at sea: the client's companion kills 10 of the host's crew.
+void CoopNet_TestCrewSails()
+{
+	if (!CheckAttribute(&CoopNetSea, "p0.ships")) return;
+	aref arShips;
+	makearef(arShips, CoopNetSea.p0.ships);
+	int iNum = GetAttributesNum(arShips);
+	for (int i = 0; i < iNum; i++)
+	{
+		aref arS = GetAttributeN(arShips, i);
+		if (sti(arS.flags) != COOPNET_SEA_FLAGSHIP || !sti(arS.inSea)) continue;
+		ref rPuppet = &Characters[sti(arS.chr)];
+		CoopNet_Log("test: companion kills 10 crew of " + rPuppet.id);
+		CoopNet_SeaBallHit(GetCharacterIndex("CoopTestMate"));
+		Ship_ApplyCrewHitpoints(rPuppet, 10.0);
 	}
 }
 // COOPNET_TESTSKIP=1: ~10 s into the game this player sleeps 8 hours through WaitDate.
@@ -621,6 +639,11 @@ void CoopNet_Dispatch(int iType)
 	if (iType == COOPNET_MSG_SEA_SHOTS)
 	{
 		CoopNet_OnSeaShots(iFrom);
+		return;
+	}
+	if (iType == COOPNET_MSG_SEA_DAMAGE)
+	{
+		CoopNet_OnSeaDamage(iFrom);
 		return;
 	}
 

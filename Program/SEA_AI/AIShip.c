@@ -2069,6 +2069,7 @@ void Ship_Ship2ShipCollision()
 
 void Ship_ApplyCrewHitpoints(ref rOurCharacter, float fCrewHP)
 {         // че-то распук метод "неподецки" - переделал 29.07.06 boal
+	if (CoopNet_SeaCrewHit(rOurCharacter, fCrewHP, 1.0, -1)) { return; } // co-op: the ship's own machine applies it
 	if (LAi_IsImmortal(rOurCharacter)) 
 	{ 
 		return; 
@@ -2129,6 +2130,7 @@ void Ship_ApplyCrewHitpoints(ref rOurCharacter, float fCrewHP)
 
 void Ship_ApplyCrewHitpointsWithCannon(ref rOurCharacter, float fCrewHP, float fCannonDamageMultiply, int iBallType)
 {         // че-то распук метод "неподецки" - переделал 29.07.06 boal
+	if (CoopNet_SeaCrewHit(rOurCharacter, fCrewHP, fCannonDamageMultiply, iBallType)) { return; } // co-op: the ship's own machine applies it
 	if (LAi_IsImmortal(rOurCharacter)) 
 	{ 
 		return; 
@@ -2760,6 +2762,7 @@ void Ship_HullHitEvent()
 	//<---Lipsar для ИИ сторожей
 	
 	rOurCharacter.Ship.LastBallCharacter = iBallCharacterIndex;
+	CoopNet_SeaBallHit(iBallCharacterIndex); // co-op: whose ball the crew damage below comes from
 
 	float	x = GetEventData();
 	float	y = GetEventData();

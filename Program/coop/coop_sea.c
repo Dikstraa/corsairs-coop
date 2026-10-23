@@ -16,10 +16,11 @@
 // running sea scene, so a puppet whose ship leaves the scene sails away until it comes back.
 
 #define COOPNET_MSG_SEA			130		// int id, string island, string mapIsland, float zeroX, zeroZ, int n, n x ship
-										// ship: int idx, int baseType, int nation, string name, int flags, float x, z, ay, speed, hp
+										// ship: int idx, int baseType, int nation, string name, int flags, float x, z, ay, speed, hp, sails, crew
 #define COOPNET_MSG_SEA_HIT		132		// int owner, int ship, float damage, int cannon, int killStatus, int attacker, int attackerShip
 #define COOPNET_MSG_SEA_SINK	133		// int owner, int ship, int killStatus, int killer, int killerShip (-1: nobody)
 #define COOPNET_MSG_SEA_SHOTS	134		// int owner, int n, n x (int ship, float x, y, z, dir, speed, angle, int cannonType, string charge, float height, size, time, maxDistance)
+#define COOPNET_MSG_SEA_DAMAGE	135		// int owner, int ship, int kind (1 crew, 2 crew by a cannon ball), float amount, float multiply, int ballType, int attacker
 #define COOPNET_SEA_FLEET		1		// ship flags: a companion in the player's own fleet
 #define COOPNET_SEA_FLAGSHIP	2		// the player's own ship (flags 0: an NPC ship)
 #define COOPNET_SEA_TICKS		5		// report every 5 ticks = 0.25 s
@@ -31,7 +32,7 @@
 #define COOPNET_SEA_PARK		10000.0	// how far a puppet sails off when its ship leaves
 
 object CoopNetSea;	// p<id>: id, name, island, mapIsland, zeroX, zeroZ, at; flagship x, z, ay;
-					// ships.s<idx>: idx, type, nation, name, flags, x, z, ay, speed, hp, seen; puppet: lx, lz, chr, inSea, parked, rel
+					// ships.s<idx>: idx, type, nation, name, flags, x, z, ay, speed, hp, sails, crew, seen; puppet: lx, lz, chr, inSea, parked, rel
 int iCoopNetSeaTicks = 0;
 int iCoopNetSeaSteerTicks = 0;
 int iCoopNetSeaLogTicks = 0;
@@ -55,6 +56,7 @@ void CoopNet_SeaTick()
 		return;
 	}
 
+	iCoopNetSeaBallBy = -1;
 	if (bSeaActive) CoopNet_SeaSendShots();
 	else
 	{
@@ -146,6 +148,8 @@ void CoopNet_SeaReport()
 		CoopNet_PutFloat(stf(rChr.Ship.Ang.y));
 		CoopNet_PutFloat(fSpeed);
 		CoopNet_PutFloat(fHP);
+		CoopNet_PutFloat(stf(rChr.Ship.SP));
+		CoopNet_PutFloat(stf(rChr.Ship.Crew.Quantity));
 	}
 	if (CoopNet_State() == COOPNET_HOSTING) CoopNet_Send(COOPNET_ALL, COOPNET_UNRELIABLE);
 	else CoopNet_Send(COOPNET_HOST_ID, COOPNET_UNRELIABLE);
@@ -207,6 +211,8 @@ void CoopNet_OnSea(int iFrom)
 		float fAY = CoopNet_GetFloat();
 		float fSpeed = CoopNet_GetFloat();
 		float fHP = CoopNet_GetFloat();
+		float fSails = CoopNet_GetFloat();
+		float fCrew = CoopNet_GetFloat();
 		if (bRelay)
 		{
 			CoopNet_PutInt(iIdx);
@@ -219,6 +225,8 @@ void CoopNet_OnSea(int iFrom)
 			CoopNet_PutFloat(fAY);
 			CoopNet_PutFloat(fSpeed);
 			CoopNet_PutFloat(fHP);
+			CoopNet_PutFloat(fSails);
+			CoopNet_PutFloat(fCrew);
 		}
 		if (!bKeep) continue;
 		string sS = "s" + iIdx;
@@ -232,6 +240,8 @@ void CoopNet_OnSea(int iFrom)
 		arShips.(sS).ay = fAY;
 		arShips.(sS).speed = fSpeed;
 		arShips.(sS).hp = fHP;
+		arShips.(sS).sails = fSails;
+		arShips.(sS).crew = fCrew;
 		arShips.(sS).seen = true;
 		if (!CheckAttribute(arShips, sS + ".inSea")) arShips.(sS).inSea = false;
 		if (iFlags == COOPNET_SEA_FLAGSHIP)
@@ -454,6 +464,8 @@ void CoopNet_SeaSteer(aref arP, aref arS)
 	float fHP = stf(arS.hp) * stf(RealShips[sti(rChr.Ship.Type)].HP); // the hull as the ship's own machine has it
 	if (fHP < 1.0) fHP = 1.0;
 	rChr.Ship.HP = fHP;
+	rChr.Ship.Crew.Quantity = arS.crew;
+
 	if (sti(arS.parked))
 	{
 		CoopNet_Log("sea: " + rChr.id + " is back in this scene");
@@ -548,6 +560,76 @@ void CoopNet_OnSeaHit(int iFrom)
 	CoopNet_Log("sea: " + rShip.id + " hit by player " + iAttacker + " ship " + iAttackerShip + " for " + fDamage + ", hull " + rShip.Ship.HP);
 }
 
+// Crew. Crew damage carries no shooter, so Ship_HullHitEvent tells whose ball it is first. (Sails are
+// not shared: Ship.SP is worked out by the engine from the sails themselves and can't be set.)
+int iCoopNetSeaBallBy = -1;
+
+void CoopNet_SeaBallHit(int iBallCharacter)
+{
+	iCoopNetSeaBallBy = iBallCharacter;
+}
+
+// From Ship_ApplyCrewHitpoints(WithCannon): true when the crew loss must not be applied here.
+bool CoopNet_SeaCrewHit(ref rTarget, float fCrewHP, float fMultiply, int iBallType)
+{
+	int iBy = iCoopNetSeaBallBy;
+	iCoopNetSeaBallBy = -1;
+	bool bByPuppet = false;
+	if (iBy >= 0)
+	{
+		if (CheckAttribute(&Characters[iBy], "coopPuppet")) bByPuppet = true;
+	}
+	if (!CheckAttribute(rTarget, "coopPuppet")) return bByPuppet;
+	if (iBy < 0 || bByPuppet) return true;
+	int iKind = 1;
+	if (iBallType >= 0) iKind = 2;
+	CoopNet_SeaSendDamage(sti(rTarget.coopPuppet), sti(rTarget.coopIdx), iKind, fCrewHP, fMultiply, iBallType);
+	return true;
+}
+
+void CoopNet_SeaSendDamage(int iOwner, int iShip, int iKind, float fAmount, float fMultiply, int iBallType)
+{
+	CoopNet_Begin(COOPNET_MSG_SEA_DAMAGE);
+	CoopNet_PutInt(iOwner);
+	CoopNet_PutInt(iShip);
+	CoopNet_PutInt(iKind);
+	CoopNet_PutFloat(fAmount);
+	CoopNet_PutFloat(fMultiply);
+	CoopNet_PutInt(iBallType);
+	CoopNet_PutInt(CoopNet_MyId());
+	CoopNet_SeaSendTo(iOwner);
+}
+
+void CoopNet_OnSeaDamage(int iFrom)
+{
+	int iOwner = CoopNet_GetInt();
+	int iShip = CoopNet_GetInt();
+	int iKind = CoopNet_GetInt();
+	float fAmount = CoopNet_GetFloat();
+	float fMultiply = CoopNet_GetFloat();
+	int iBallType = CoopNet_GetInt();
+	int iAttacker = CoopNet_GetInt();
+	if (iOwner != CoopNet_MyId())
+	{
+		if (CoopNet_State() != COOPNET_HOSTING) return;
+		CoopNet_Begin(COOPNET_MSG_SEA_DAMAGE);
+		CoopNet_PutInt(iOwner);
+		CoopNet_PutInt(iShip);
+		CoopNet_PutInt(iKind);
+		CoopNet_PutFloat(fAmount);
+		CoopNet_PutFloat(fMultiply);
+		CoopNet_PutInt(iBallType);
+		CoopNet_PutInt(iAttacker);
+		CoopNet_Send(iOwner, COOPNET_RELIABLE);
+		return;
+	}
+	if (!bSeaActive || !CoopNet_SeaOwnShip(iShip)) return;
+	ref rShip = &Characters[iShip];
+	iCoopNetSeaBallBy = -1;
+	if (iKind == 1) Ship_ApplyCrewHitpoints(rShip, fAmount);
+	if (iKind == 2) Ship_ApplyCrewHitpointsWithCannon(rShip, fAmount, fMultiply, iBallType);
+	CoopNet_Log("sea: " + rShip.id + " crew hit by player " + iAttacker + ": " + fAmount + ", crew " + rShip.Ship.Crew.Quantity);
+}
 // From ShipDead: a ship this machine runs sank; everybody learns who finished it.
 void CoopNet_SeaShipDead(int iDead, int iKillStatus, int iKiller)
 {

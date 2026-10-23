@@ -13,6 +13,13 @@ come from an installed copy of the Ship Pack: clone this repo over the game fold
 - `Program/` — game scripts. The first commit is the unmodified Ship Pack; later commits are mod changes.
 - `Program/coop/` — script side of the mod.
 
+## Requirements
+
+- DirectX 9 runtime: `d3dx9_43.dll` (x64) from the Microsoft DirectX End-User Runtime (June 2010).
+  Without it `Animation.dll`, `Sea.dll`, `Weather.dll` and `renderer/dx9.dll` fail with error 126
+  and the game exits with "No service: RENDER". Either install the runtime or put the x64
+  `d3dx9_43.dll` next to `Maelstrom.exe`.
+
 ## Encoding
 
 Scripts are Windows-1251 with CRLF line endings. `.gitattributes` disables any conversion;

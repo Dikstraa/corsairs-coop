@@ -52,7 +52,16 @@ Hooks: `Whr_TimeUpdate` (WhrWeather.c) and `wdmEvent_UpdateDate` (worldmap_event
 engine's proposed time through `CoopNet_TimeHook`, which applies the shared date and time.
 During a session the DLL also keeps the game running when its window is not active.
 
-Test without clicking through menus: `run_pair.ps1 -NewGame` starts both instances into a new game.
+Time skips are voted (`coop_vote.h`): `AddTimeToCurrent`, `AddDataToCurrent` (calendar.c) and
+`WaitDate` (quests.c) call `CoopNet_InterceptSkip` first. In a session the skip becomes a request to
+the host; everybody else sees it in the game log and agrees with **F8** within 30 s. When all agree
+the host moves the clock and everyone jumps together; one "no" or a timeout rejects it. Skips under
+one game hour need no vote. A quest waiting on `WaitDate` continues for the requester either way,
+so it can't get stuck. `SetCurrentTime` is not intercepted (the weather calls it on every location
+load); in a session the shared clock simply overrides it.
+
+Test without clicking through menus: `run_pair.ps1 -NewGame` starts both instances into a new game;
+`-TestSkip` also makes the host sleep 8 hours and the client agree.
 
 ## Engine and script quirks
 

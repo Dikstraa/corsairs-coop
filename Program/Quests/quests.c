@@ -614,6 +614,7 @@ void WaitDatePostEventControl()
 //----------------------------------------------------
 void WaitDate(string postName,int year, int month, int day, int hour, int minute)
 {
+	if (CoopNet_InterceptSkip(year, month, day, hour, minute, postName)) return; // coop: voted; postName completes afterwards
 	sPostWaitName = postName;
 	postWaitYear = year;
 	postWaitMonth = month;

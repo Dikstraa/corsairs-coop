@@ -116,6 +116,15 @@ void Clock::AdvanceHost(double realNow)
     rate_ = PaceFor(players_);
 }
 
+void Clock::Skip(double gameSeconds, double realNow)
+{
+    if (!valid_ || !host_)
+        return;
+    base_ = Now(realNow) + gameSeconds;
+    baseReal_ = realNow;
+    ++epoch_;
+}
+
 void Clock::OnHostClock(double gameSeconds, double rate, uint32_t epoch, double realNow)
 {
     valid_ = true;

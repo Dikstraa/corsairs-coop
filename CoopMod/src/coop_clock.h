@@ -71,6 +71,8 @@ class Clock
     void RemovePlayer(int id) { players_.erase(id); }
     // Folds elapsed time in and recomputes the pace from the players' states.
     void AdvanceHost(double realNow);
+    // An approved time skip: moves the clock forward and starts a new epoch.
+    void Skip(double gameSeconds, double realNow);
 
     // ---- client ----
     void OnHostClock(double gameSeconds, double rate, uint32_t epoch, double realNow);

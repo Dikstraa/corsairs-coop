@@ -82,6 +82,10 @@ int main()
     host.RemovePlayer(1);
     host.AdvanceHost(500.0);
     CHECK(host.Rate() == 3600);
+    uint32_t epoch = host.Epoch();
+    double before = host.Now(500.0);
+    host.Skip(8 * 3600, 500.0);
+    CHECK(Near(host.Now(500.0), before + 8 * 3600) && host.Epoch() == epoch + 1);
 
     std::printf("[4] client follows, stops extrapolating when the host is silent\n");
     Clock client;

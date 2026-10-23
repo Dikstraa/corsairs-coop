@@ -147,6 +147,7 @@ int GetAddingTimeDay(int hour,int minute)
 
 int AddTimeToCurrent(int hour,int minute)
 {
+	if (CoopNet_InterceptSkip(0, 0, 0, hour, minute, "")) return 0; // coop: time skips are voted
 	float curtime = GetTime();
 	float nexttime = curtime+hour+(makefloat(minute)/60.0);
 	int addingDays = 0;
@@ -171,6 +172,7 @@ int AddTimeToCurrent(int hour,int minute)
 
 void AddDataToCurrent(int addYear,int addMonth,int addDay)
 {
+	if (CoopNet_InterceptSkip(addYear, addMonth, addDay, 0, 0, "")) return; // coop: time skips are voted
 	int nextDay = GetDataDay()+addDay;
 	int curMonth = GetDataMonth();
 	int curYear = GetDataYear();

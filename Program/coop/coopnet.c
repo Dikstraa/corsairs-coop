@@ -20,6 +20,9 @@
 #define COOPNET_EVT_PEER_JOINED		3	// int peerId, string name
 #define COOPNET_EVT_PEER_LEFT		4	// int peerId, int reason
 #define COOPNET_EVT_DISCONNECTED	5	// int reason
+#define COOPNET_EVT_SKIP_VOTE		6	// string text: somebody asks to skip time (F8 agrees)
+#define COOPNET_EVT_SKIP_RESULT		7	// int approved, int mine, string continuation, string text
+#define COOPNET_EVT_NOTICE			8	// string text
 #define COOPNET_MSG_USER			100
 
 #define COOPNET_MSG_TEST_HELLO		100	// client -> host: string text, float f, int i
@@ -72,6 +75,9 @@ native int CoopNet_ClockDay();
 native int CoopNet_ClockDaysAhead();
 native float CoopNet_ClockRate();
 native int CoopNet_ClockRestart();
+native int CoopNet_SkipVoting();
+native int CoopNet_RequestSkip(int minutes, string continuation);
+native int CoopNet_VoteYes();
 
 #library "COOPNET"
 
@@ -121,6 +127,19 @@ void CoopNet_TestNewGame()
 }
 
 int iCoopNetClockLogTicks = 0;
+int iCoopNetTestSkipTicks = 0;
+
+// COOPNET_TESTSKIP=1: ~10 s into the game this player sleeps 8 hours through WaitDate.
+void CoopNet_TestSkip()
+{
+	if (iCoopNetTestSkipTicks < 0 || CoopNet_GetEnv("COOPNET_TESTSKIP") != "1") return;
+	if (!CoopNet_SkipVoting()) return;
+	iCoopNetTestSkipTicks++;
+	if (iCoopNetTestSkipTicks < 200) return;
+	iCoopNetTestSkipTicks = -1;
+	CoopNet_Log("test: WaitDate 8 hours");
+	WaitDate("", 0, 0, 0, 8, 0);
+}
 
 // Logs the shared clock every ~5 s while connected.
 void CoopNet_LogClock()
@@ -144,6 +163,7 @@ void CoopNet_Tick()
 	CoopNet_UpdateStatus();
 	CoopNet_Update();
 	CoopNet_LogClock();
+	CoopNet_TestSkip();
 	int iType = CoopNet_Recv();
 	while (iType != 0)
 	{
@@ -179,6 +199,33 @@ void CoopNet_OnLocationUnload()
 void CoopNet_OnGameStarted()
 {
 	CoopNet_ClockRestart();
+	CI_CreateAndSetControls("", "CoopVoteYes", CI_GetKeyCode("VK_F8"), 0, false);
+}
+
+#event_handler("Control Activation", "CoopNet_OnControl");
+void CoopNet_OnControl()
+{
+	string sControl = GetEventData();
+	if (sControl == "CoopVoteYes") CoopNet_VoteYes();
+}
+
+// ---- time skips ----------------------------------------------------------------
+// AddTimeToCurrent, AddDataToCurrent (calendar.c) and WaitDate (quests.c) call this first.
+// In a session the skip becomes a vote; returns true when the caller must not apply it itself.
+bool CoopNet_InterceptSkip(int iYear, int iMonth, int iDay, int iHour, int iMinute, string sContinue)
+{
+	if (!CoopNet_SkipVoting()) return false;
+	int iMinutes = (((iYear * 365 + iMonth * 30 + iDay) * 24) + iHour) * 60 + iMinute;
+	if (iMinutes <= 0) return false;
+	CoopNet_RequestSkip(iMinutes, sContinue);
+	return true;
+}
+
+// Puts the shared clock on screen now instead of at the next weather update.
+void CoopNet_ApplyClockNow()
+{
+	CoopNet_TimeHook(GetTime(), 0);
+	RefreshWeather();
 }
 
 // Where this player is and whether it fights: drives the shared clock's pace.
@@ -313,6 +360,32 @@ void CoopNet_Dispatch(int iType)
 		case COOPNET_EVT_DISCONNECTED:
 			iReason = CoopNet_GetInt();
 			CoopNet_Log("disconnected from host, reason " + iReason);
+		break;
+
+		case COOPNET_EVT_SKIP_VOTE:
+			sText = CoopNet_GetString();
+			Log_Info(sText);
+			if (CoopNet_GetEnv("COOPNET_AUTOVOTE") == "1") CoopNet_VoteYes(); // test instances
+		break;
+
+		case COOPNET_EVT_SKIP_RESULT:
+			iNum = CoopNet_GetInt();      // approved
+			iId = CoopNet_GetInt();       // mine
+			sName = CoopNet_GetString();  // continuation
+			sText = CoopNet_GetString();
+			Log_Info(sText);
+			if (iNum) CoopNet_ApplyClockNow();
+			if (iId)
+			{
+				// the quest waiting for this skip goes on either way, so it can't get stuck
+				if (sName != "") CompleteQuestName(sName, "");
+				QuestsCheck();
+			}
+		break;
+
+		case COOPNET_EVT_NOTICE:
+			sText = CoopNet_GetString();
+			Log_Info(sText);
 		break;
 
 		case COOPNET_MSG_TEST_HELLO:

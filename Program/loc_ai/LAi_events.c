@@ -278,7 +278,9 @@ void LAi_CharacterAttack()
 	//Реакция груп на атаку
 	LAi_group_Attack(attack, enemy);
 	//Начисление повреждений
+	float fCoopHp = CoopNet_LandHitBefore(enemy); // CoopNet: a hit on another player's puppet goes to that player
 	LAi_ApplyCharacterAttackDamage(attack, enemy, attackType, isBlocked, blockSave);
+	CoopNet_LandHitAfter(attack, enemy, fCoopHp);
 	//Обновим цель сразу
 	LAi_group_UpdateTargets(enemy);
 	string func = enemy.chr_ai.type;
@@ -359,7 +361,9 @@ void LAi_CharacterFire()
 			findCh = GetCharacter(idx);	
 			if(findCh.chr_ai.group != LAI_GROUP_PLAYER)
 			{
+				float fCoopHpMulti = CoopNet_LandHitBefore(&Characters[idx]); // CoopNet
 				LAi_ApplyCharacterFireDamage(attack, &Characters[idx], kDist );
+				CoopNet_LandHitAfter(attack, &Characters[idx], fCoopHpMulti);
 				// Log_Info(Characters[idx].name);
 			}	
 			
@@ -392,7 +396,9 @@ void LAi_CharacterFire()
 	//Реакция груп на атаку
 	LAi_group_Attack(attack, enemy);
 	//Начисление повреждений
+	float fCoopHpFire = CoopNet_LandHitBefore(enemy); // CoopNet
 	LAi_ApplyCharacterFireDamage(attack, enemy, kDist);	
+	CoopNet_LandHitAfter(attack, enemy, fCoopHpFire);
 	if(CheckAttribute(attack, "chr_ai.multidmg") && sti(attack.chr_ai.multidmg) > 0)
 	{
 		if(stf(enemy.chr_ai.hp) < 1.0 && enemy.chr_ai.group == LAI_GROUP_PLAYER) enemy.chr_ai.hp = 5;

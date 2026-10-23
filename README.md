@@ -240,12 +240,26 @@ its people (`LAi_loginedcharacters`) twice a second, 12 per message; the others 
 puppets `CoopLand_<owner>_<idx>` that walk, draw blades and die with them (`LAi_KillCharacter`, a
 scripted death: nobody gets the kill). A player who is not the owner hides its own made-up people
 (`location = "none"`, the old address kept in `coopLandHidden`) and gets them back when the owner
-leaves or when it leaves itself. Officers are never hidden: every player sends its own. Puppets
-are immortal for now: fights with them are not shared yet.
+leaves or when it leaves itself. Officers are never hidden: every player sends its own.
+
+Fights: a puppet has 100000 health and is immortal except during a hit. `LAi_CharacterAttack` and
+`LAi_CharacterFire` (`loc_ai/LAi_events.c`) wrap the damage call with `CoopNet_LandHitBefore/After`:
+the hit is worked out as usual (attacker's weapon, skills, perks, criticals, experience), the health
+the puppet lost is put back and sent to its owner (`MSG_LAND_HIT`), whose game takes it off the
+real character (`LAi_ApplyCharacterDamage` + `LAi_CheckKillCharacter`; the hero itself for a
+player's puppet, so a player can die from another game's bandits, and that rolls the world back)
+and sets it on the attacker's puppet there. Sides come with the people: foes (hostile to the
+owner's hero, puppets in group `CoopFoes`, hostile to ours), allies (officers; `LAI_GROUP_PLAYER`)
+and neutral (`CoopPeople`). Another player's puppet is an ally, or a foe when the two flags are at
+war (PvP). So the owner's bandits go for every player's puppet, everybody's officers go for the
+foes, and our own hits on allies don't count. Players' puppets share the player group: a crime by
+one player turns the town on all of them.
 
 `run_pair.ps1 -NewGame -TestLand`: both go to Bridgetown, the client 15 s after the host, so the
-host owns the town; the client runs 10 m and back, then draws its blade; after 50 s the host goes
-to the tavern. Measured: a running player puppet up to 3 m behind, a standing one 0.2 m; the
+host owns the town; one of the host's people strikes the client's puppet; the client runs 10 m and
+back, draws its blade and strikes one of the host's people 5 times; after 75 s the host goes to the
+tavern. Measured: 3 blows of 23-27 killed the host's beggar there, later blows were dropped; the
+host's guards then went for the client's puppet and their blows killed the client's hero. Measured: a running player puppet up to 3 m behind, a standing one 0.2 m; the
 client hid 33-40 of its townsfolk and showed the host's 35-36, walking up to ~5 m behind (under
 the 6 m jump); its own came back half a second after the host left.
 
@@ -310,6 +324,10 @@ Test without clicking through menus: `run_pair.ps1 -NewGame` starts both instanc
 - Compile errors go to `error.log`; the failing function then misbehaves silently.
 - Results through `ref` float parameters are unreliable: the callee's own locals end up in them.
   Return such results through attributes.
+- A negative int from `CoopNet_GetInt` prints as negative but compares as unsigned (`-1 < 0` is
+  false): send such values shifted up (`MSG_LAND_HIT` sends index + 1).
+- `LAi_ApplyCharacterAttackDamage` skips immortals entirely, and the fight code reads
+  `chr_ai.special` (made when a blade is equipped; `UnsetSpecialAttributes` makes it for a puppet).
 
 ## Requirements
 

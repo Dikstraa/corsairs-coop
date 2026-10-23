@@ -7,6 +7,19 @@
 !/start.ini
 !/Program/
 !/CoopMod/
+# the two RESOURCE files the mod changes (the Esc menu's co-op button and its label)
+!/RESOURCE/
+/RESOURCE/*
+!/RESOURCE/INI/
+/RESOURCE/INI/*
+!/RESOURCE/INI/interfaces/
+/RESOURCE/INI/interfaces/*
+!/RESOURCE/INI/interfaces/game_menu.ini
+!/RESOURCE/INI/TEXTS/
+/RESOURCE/INI/TEXTS/*
+!/RESOURCE/INI/TEXTS/russian/
+/RESOURCE/INI/TEXTS/russian/*
+!/RESOURCE/INI/TEXTS/russian/common.ini
 
 /CoopMod/build/
 *.coop_backup

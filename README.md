@@ -23,18 +23,24 @@ come from an installed copy of the Ship Pack: clone this repo over the game fold
 
 ## Playing
 
-1. Build (`CoopMod/build.bat`) with the Steamworks SDK unpacked in `CoopMod/steamworks_sdk/`
-   (not in git). It copies `CoopNet.dll` to `modules/` and `steam_api64.dll` next to `Maelstrom.exe`.
-2. Copy `CoopMod/coop.ini.example` next to `Maelstrom.exe` as `coop.ini`: the host sets `mode=host`,
-   the others `mode=join`. With `transport=steam` both need Steam running; the game uses
-   Spacewar (AppID 480) and writes `steam_appid.txt` itself.
-3. Steam: the client finds a lobby hosted by a Steam friend (else any open one), or by part of the
-   host's name in `address`. While the game runs, accepting a Steam invite to the host's lobby joins too.
+The repository carries everything a player needs on top of an installed Ship Pack: the scripts, the
+built `modules/CoopNet.dll`, `steam_api64.dll` (redistributable from the Steamworks SDK) and
+`coop.ini` (`mode=auto`, `transport=steam`). Clone or copy it over the game folder, start Steam, start
+the game: the first player hosts, the next ones join a Steam friend's game by themselves (or through a
+Steam invite). Everybody must run the same version.
+
+Developers: `CoopMod/build.bat` rebuilds `CoopNet.dll` (VS 2022 Build Tools, x64; Steam support needs
+the Steamworks SDK unpacked in `CoopMod/steamworks_sdk/`, not in git) and copies it to `modules/`;
+commit the rebuilt DLL with the source change. Other `coop.ini` settings: `mode=host|join|off`,
+`transport=udp` with the host's IP in `address` for LAN/VPN, `name=` to override the Steam name.
+
+Steam P2P goes through Valve relays: no port forwarding. Two instances on one PC share a Steam
+account and can't connect to each other over Steam; test those over UDP (`run_pair.ps1`).
 
 With `transport=steam` the DLL starts the Steam API (as Spacewar, `SteamAppId`/`SteamGameId` set to 480)
 as soon as the engine loads its modules, before the renderer creates its Direct3D device; that is
 what lets the Steam overlay (Shift+Tab) hook the game even when it isn't started from Steam.
-`mode=auto` (the default in `coop.ini.example`) joins a friend's game if there is one, else hosts;
+`mode=auto` (the default in `coop.ini`) joins a friend's game if there is one, else hosts;
 an empty host accepts a friend's invite and moves to the friend's game. In-game messages
 ("Кооператив: ...") report connections.
 
@@ -42,9 +48,6 @@ The Esc menu has a co-op button (`RESOURCE/INI/interfaces/game_menu.ini`, label 
 `RESOURCE/INI/TEXTS/russian/common.ini`): outside a session the first press creates a game, then it
 opens the Steam overlay's invite dialog. The script tick runs from the `frame` event timed by real
 time, since posted events stop while the Esc menu pauses the game.
-
-Steam P2P goes through Valve relays: no port forwarding. Two instances on one PC share a Steam
-account and can't connect to each other over Steam; test those over UDP (`run_pair.ps1`).
 
 ## Players on the world map
 

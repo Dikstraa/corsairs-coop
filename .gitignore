@@ -7,6 +7,12 @@
 !/start.ini
 !/Program/
 !/CoopMod/
+# what a player needs besides the scripts: the built mod DLL, Steam's API DLL and the co-op settings
+!/modules/
+/modules/*
+!/modules/CoopNet.dll
+!/steam_api64.dll
+!/coop.ini
 # the two RESOURCE files the mod changes (the Esc menu's co-op button and its label)
 !/RESOURCE/
 /RESOURCE/*

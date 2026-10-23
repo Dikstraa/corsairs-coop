@@ -92,18 +92,24 @@ warring ships, floating barrels) are the same for everybody. Quest encounters an
 
 ## Players at sea
 
-`Program/coop/coop_sea.c`: players at sea in the same place see each other's ships.
+`Program/coop/coop_sea.c`: players at sea in the same place share their sea battles.
 
-- Every player at sea sends its ship four times a second (island, position, heading, speed, ship
-  type); the host passes it on. Near an island positions are in the island's sea coordinates, the
-  same for everybody there. In open sea each scene is centred where its player left the world map,
-  so positions travel as world map coordinates and are turned back into the receiver's own.
-- Another player within 2500 sea units is a "puppet": a friendly NPC with a ship of the same type
-  that sails (AI move task) for a point ahead of that player's ship. Its top speed is the player's
-  speed plus a share of the distance it is behind (`coopSpeed`, applied in `Ship_UpdateParameters`),
+- Every player at sea sends all ships of its scene four times a second: its own fleet (flagship and
+  companions, whose officers and skills count on its machine) and the NPC ships of its scene, each
+  with position, heading, speed, type, nation (flag) and hull; the host passes the list on. Near an
+  island positions are in the island's sea coordinates, the same for everybody there. In open sea
+  each scene is centred where its player left the world map, so positions travel as world map
+  coordinates and are turned back into the receiver's own.
+- Every ship is run by the machine it came from. Elsewhere, within 2500 sea units, it is a "puppet":
+  an NPC with a ship of the same type that sails (AI move task) for a point ahead of the real ship.
+- Sides follow the flags: another player's fleet is friend or enemy by the relation between its
+  nation and this player's flag (France against England at war: the players fight each other); an
+  NPC ship by its nation's relation to this player. Sides are re-applied when flags or relations
+  change (`SetCharacterRelationBoth` for the ships this machine runs, then `UpdateRelations`).
+- A puppet's top speed is the real ship's speed plus a share of the distance it is behind (`coopSpeed`, applied in `Ship_UpdateParameters`),
   so it catches up without overshooting: in tests it stays 7–25 sea units off.
 - Ships in a running sea scene can't be moved or removed (`Group_SetXZ_AY` and writes to `Ship.Pos`
-  are ignored), so a puppet is created where its player is, and when the player leaves the scene it
+  are ignored), so a puppet is created where its ship is, and when the ship leaves the scene it
   sails away and comes back when the player does.
 
 Joining from the world map: a player at sea within 5 map units (its open sea position, or where it

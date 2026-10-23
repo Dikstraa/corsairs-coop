@@ -251,7 +251,7 @@ void CoopNet_TestSea()
 	{
 		if (CoopNet_GetEnv("COOPNET_SEAJOIN") == "1" && CoopNet_State() == COOPNET_CONNECTED) return; // waits on the map by the host's avatar
 		if (CoopNet_State() == COOPNET_CONNECTED) worldMap.playerShipX = stf(worldMap.playerShipX) + 2.0;
-		CoopNet_Log("test: to the sea from map x " + worldMap.playerShipX);
+		if (CoopNet_GetEnv("COOPNET_SEAFLAGS") == "1") CoopNet_TestFlags();		CoopNet_Log("test: to the sea from map x " + worldMap.playerShipX);
 		wdmReloadToSea();
 	}
 	if (iCoopNetTestMapTicks == 550 && bSeaActive && CoopNet_State() == COOPNET_HOSTING)
@@ -266,6 +266,26 @@ void CoopNet_TestSea()
 	}
 }
 
+// COOPNET_SEAFLAGS=1: before going to sea France and England go to war, the host hoists the French flag,
+// the client the English one and gets a companion of its own.
+void CoopNet_TestFlags()
+{
+	if (CoopNet_State() == COOPNET_HOSTING)
+	{
+		pchar.nation = FRANCE;
+		SetNationRelationBoth(FRANCE, ENGLAND, RELATION_ENEMY); // reaches the client with the shared world
+		CoopNet_Log("test: host sails under France, relation to England " + GetRelationName(GetNationRelation(FRANCE, ENGLAND)));
+		return;
+	}
+	pchar.nation = ENGLAND;
+	int iMate = NPC_GenerateCharacter("CoopTestMate", "officer_15", "man", "man", 10, ENGLAND, -1, true);
+	ref rMate = &Characters[iMate];
+	rMate.Ship.Type = GenerateShipExt(sti(RealShips[sti(pchar.Ship.Type)].BaseType), true, rMate);
+	SetBaseShipData(rMate);
+	SetCrewQuantityFull(rMate);
+	SetCompanionIndex(pchar, -1, iMate);
+	CoopNet_Log("test: client sails under England with companion " + rMate.id);
+}
 // COOPNET_TESTSKIP=1: ~10 s into the game this player sleeps 8 hours through WaitDate.
 void CoopNet_TestSkip()
 {

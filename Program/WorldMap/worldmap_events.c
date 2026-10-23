@@ -40,7 +40,11 @@ void wdmEvent_ShipEncounter()
 	float playerShipZ = GetEventData();
 	float playerShipAY = GetEventData();
 	int eshipIndex = GetEventData();	
-	if (CoopNet_IsAvatarEncounter(eshipIndex)) return; // coop: another player's ship, not a battle
+	if (CoopNet_IsAvatarEncounter(eshipIndex)) // coop: another player's ship, not a battle
+	{
+		CoopNet_MeetAvatar(eshipIndex); // at sea: join that player there
+		return;
+	}
 	if (CheckAttribute(pchar, "SkipEshipIndex") && pchar.SkipEshipIndex == eshipIndex) return; // boal
 	pchar.eshipIndex = eshipIndex;
 	LaunchMapScreen();

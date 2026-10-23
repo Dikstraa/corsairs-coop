@@ -11,7 +11,7 @@
 // matched to close the gap. A ship can't be moved or removed in a running sea scene, so a puppet whose
 // player leaves sails away until it comes back or the scene ends.
 
-#define COOPNET_MSG_SEA			130		// int id, string island, float x, z, ay, speed, int baseType, string shipName
+#define COOPNET_MSG_SEA			130		// int id, string island, float x, z, ay, speed, int baseType, string shipName, string mapIsland, float zeroX, zeroZ
 #define COOPNET_SEA_TICKS		5		// report every 5 ticks = 0.25 s
 #define COOPNET_SEA_STEER_TICKS	20		// new move task for puppets every second
 #define COOPNET_SEA_RANGE		2500.0	// sea units: farther players are not in this scene
@@ -35,6 +35,14 @@ void CoopNet_SeaTick()
 		if (CheckAttribute(pchar, "Ship.Pos.x")) bAtSea = true;
 	}
 	if (!bSeaActive) CoopNet_SeaForgetScene();
+	if (IsEntity(&worldMap))
+	{
+		iCoopNetSeaSteerTicks++;
+		if (iCoopNetSeaSteerTicks < COOPNET_SEA_STEER_TICKS) return;
+		iCoopNetSeaSteerTicks = 0;
+		CoopNet_SeaOfferJoin();
+		return;
+	}
 
 	iCoopNetSeaTicks++;
 	if (iCoopNetSeaTicks >= COOPNET_SEA_TICKS)
@@ -82,6 +90,9 @@ void CoopNet_SeaReport()
 	CoopNet_PutFloat(fSpeed);
 	CoopNet_PutInt(iType);
 	CoopNet_PutString(pchar.Ship.Name);
+	CoopNet_PutString(worldMap.island); // the scene's frame, for players joining this scene
+	CoopNet_PutFloat(stf(worldMap.zeroX));
+	CoopNet_PutFloat(stf(worldMap.zeroZ));
 	if (CoopNet_State() == COOPNET_HOSTING) CoopNet_Send(COOPNET_ALL, COOPNET_UNRELIABLE);
 	else CoopNet_Send(COOPNET_HOST_ID, COOPNET_UNRELIABLE);
 }
@@ -96,6 +107,9 @@ void CoopNet_OnSea(int iFrom)
 	float fSpeed = CoopNet_GetFloat();
 	int iType = CoopNet_GetInt();
 	string sName = CoopNet_GetString();
+	string sMapIsland = CoopNet_GetString();
+	float fZeroX = CoopNet_GetFloat();
+	float fZeroZ = CoopNet_GetFloat();
 	if (iId == CoopNet_MyId()) return;
 	if (CoopNet_State() == COOPNET_HOSTING)
 	{
@@ -109,6 +123,9 @@ void CoopNet_OnSea(int iFrom)
 		CoopNet_PutFloat(fSpeed);
 		CoopNet_PutInt(iType);
 		CoopNet_PutString(sName);
+		CoopNet_PutString(sMapIsland);
+		CoopNet_PutFloat(fZeroX);
+		CoopNet_PutFloat(fZeroZ);
 		CoopNet_Send(COOPNET_ALL, COOPNET_UNRELIABLE);
 	}
 	string sKey = "p" + iId;
@@ -120,6 +137,9 @@ void CoopNet_OnSea(int iFrom)
 	CoopNetSea.(sKey).speed = fSpeed;
 	CoopNetSea.(sKey).type = iType;
 	CoopNetSea.(sKey).name = sName;
+	CoopNetSea.(sKey).mapIsland = sMapIsland;
+	CoopNetSea.(sKey).zeroX = fZeroX;
+	CoopNetSea.(sKey).zeroZ = fZeroZ;
 	CoopNetSea.(sKey).at = CoopNet_Seconds();
 	if (!CheckAttribute(&CoopNetSea, sKey + ".inSea")) CoopNetSea.(sKey).inSea = false;
 }
@@ -291,3 +311,131 @@ void CoopNet_SeaLog()
 	CoopNet_Log(sLine);
 }
 
+// ---- joining another player's sea scene from the world map -----------------------------------
+// On the world map, a player at sea within COOPNET_SEA_JOIN_RANGE map units is offered in the log;
+// F9 (or sailing into its avatar) takes this player into that player's scene, next to its ship:
+// wdmReloadToSea then asks CoopNet_SeaJoinLogin for the scene instead of the map's encounters.
+
+#define COOPNET_SEA_JOIN_SIDE	200.0	// sea units to the side of the other player's ship
+#define COOPNET_SEA_JOIN_RANGE	5.0		// world map units
+#define COOPNET_SEA_JOIN_PAUSE	15.0	// seconds after the map opens before a join is offered
+#define COOPNET_SEA_OFFER_EVERY	10.0	// seconds between repeats of the offer in the log
+
+string sCoopNetSeaJoin = "";		// key in CoopNetSea of the player being joined
+string sCoopNetSeaOffer = "";		// key of the player at sea that F9 would join now
+float fCoopNetSeaOfferedAt = -100.0;
+
+// Where a player at sea is on the world map: its position in open sea, else where it left the map.
+bool CoopNet_SeaMapPos(aref arP)
+{
+	if (CoopNet_Seconds() - stf(arP.at) > COOPNET_SEA_STALE) return false;
+	if (arP.island == "")
+	{
+		arP.mx = arP.x;
+		arP.mz = arP.z;
+		return true;
+	}
+	string sP = "p" + arP.id;
+	if (!CheckAttribute(&CoopNetPlayers, sP + ".x") || !sti(CoopNetPlayers.(sP).hasMap)) return false;
+	arP.mx = CoopNetPlayers.(sP).x;
+	arP.mz = CoopNetPlayers.(sP).z;
+	return true;
+}
+
+// On the world map: finds the nearest player at sea and offers to join it.
+void CoopNet_SeaOfferJoin()
+{
+	string sBest = "";
+	if (CoopNet_Seconds() - fCoopNetMapOpenedAt >= COOPNET_SEA_JOIN_PAUSE)
+	{
+		float fBest = COOPNET_SEA_JOIN_RANGE * COOPNET_SEA_JOIN_RANGE;
+		float fMyX = stf(worldMap.playerShipX);
+		float fMyZ = stf(worldMap.playerShipZ);
+		aref arList;
+		makearef(arList, CoopNetSea);
+		int iNum = GetAttributesNum(arList);
+		for (int i = 0; i < iNum; i++)
+		{
+			aref arP = GetAttributeN(arList, i);
+			if (!CoopNet_SeaMapPos(arP)) continue;
+			float fDX = stf(arP.mx) - fMyX;
+			float fDZ = stf(arP.mz) - fMyZ;
+			if (fDX * fDX + fDZ * fDZ > fBest) continue;
+			fBest = fDX * fDX + fDZ * fDZ;
+			sBest = GetAttributeName(arP);
+		}
+	}
+	if (sBest == "")
+	{
+		sCoopNetSeaOffer = "";
+		return;
+	}
+	if (sBest != sCoopNetSeaOffer || CoopNet_Seconds() - fCoopNetSeaOfferedAt > COOPNET_SEA_OFFER_EVERY)
+	{
+		Log_Info(CoopNetSea.(sBest).name + " is at sea nearby: F9 to join");
+		fCoopNetSeaOfferedAt = CoopNet_Seconds();
+	}
+	sCoopNetSeaOffer = sBest;
+	if (CoopNet_GetEnv("COOPNET_SEAJOIN") == "1") CoopNet_SeaJoinOffered(); // test instances
+}
+
+// F9 ("CoopJoinSea").
+void CoopNet_SeaJoinOffered()
+{
+	if (!IsEntity(&worldMap) || sCoopNetSeaOffer == "" || wdmLockReload) return;
+	CoopNet_SeaJoin(sCoopNetSeaOffer);
+}
+
+// From wdmEvent_ShipEncounter, when the ship ran into is a player's avatar.
+void CoopNet_MeetAvatar(int iIndex)
+{
+	if (!wdmSetCurrentShipData(iIndex)) return;
+	string sEnc = worldMap.encounter.id;
+	if (!CheckAttribute(&worldMap, "encounters." + sEnc + ".coopAvatar")) return;
+	if (CoopNet_Seconds() - fCoopNetMapOpenedAt < COOPNET_SEA_JOIN_PAUSE) return; // just came back from that scene
+	string sKey = "p" + worldMap.encounters.(sEnc).coopAvatar;
+	if (!CheckAttribute(&CoopNetSea, sKey + ".at")) return;
+	if (CoopNet_Seconds() - stf(CoopNetSea.(sKey).at) > COOPNET_SEA_STALE) return; // not at sea
+	if (wdmLockReload) return;
+	CoopNet_SeaJoin(sKey);
+}
+
+void CoopNet_SeaJoin(string sKey)
+{
+	CoopNet_Log("sea: joining player " + CoopNetSea.(sKey).id + " at sea");
+	Log_Info("Joining " + CoopNetSea.(sKey).name + " at sea");
+	sCoopNetSeaJoin = sKey;
+	sCoopNetSeaOffer = "";
+	wdmReloadToSea();
+}
+// From wdmReloadToSea after WdmAddPlayerGroup: true when this reload joins another player's scene;
+// then wdmLoginToSea and the map's frame (worldMap.island, zeroX/Z) are that scene's.
+bool CoopNet_SeaJoinLogin()
+{
+	string sKey = sCoopNetSeaJoin;
+	sCoopNetSeaJoin = "";
+	if (sKey == "" || !CheckAttribute(&CoopNetSea, sKey + ".zeroX")) return false;
+	aref arP;
+	makearef(arP, CoopNetSea.(sKey));
+	worldMap.island = arP.mapIsland;
+	worldMap.zeroX = arP.zeroX;
+	worldMap.zeroZ = arP.zeroZ;
+	float fX = stf(arP.x);
+	float fZ = stf(arP.z);
+	if (arP.island == "")
+	{
+		float fScale = CoopNet_SeaScale();
+		fX = (fX - stf(arP.zeroX)) * fScale;
+		fZ = (fZ - stf(arP.zeroZ)) * fScale;
+	}
+	float fAY = stf(arP.ay);
+	// abeam to port, same heading
+	fX = fX - cos(fAY) * COOPNET_SEA_JOIN_SIDE;
+	fZ = fZ + sin(fAY) * COOPNET_SEA_JOIN_SIDE;
+	wdmLoginToSea.island = arP.island;
+	wdmLoginToSea.playerGroup.x = fX;
+	wdmLoginToSea.playerGroup.z = fZ;
+	wdmLoginToSea.playerGroup.ay = fAY;
+	CoopNet_Log("sea: logging in next to player " + arP.id + " at " + fX + " " + fZ + " (island '" + arP.island + "')");
+	return true;
+}

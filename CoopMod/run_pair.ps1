@@ -6,8 +6,9 @@
 # -TestSkip: the host sleeps 8 hours in game, the client agrees to the vote by itself.
 # -ToMap: both go to the world map once in the game.
 # -ToSea: both go from the world map to the sea next to each other, then the host sets sail.
+# -SeaJoin: only the host goes to sea; the client stays on the map by its avatar and joins it there.
 # -TestWorld: the host and the client each change the shared world and log what they see.
-param([int]$Seconds = 60, [switch]$NewGame, [switch]$TestSkip, [switch]$ToMap, [switch]$TestWorld, [switch]$ToSea, [switch]$Keep)
+param([int]$Seconds = 60, [switch]$NewGame, [switch]$TestSkip, [switch]$ToMap, [switch]$TestWorld, [switch]$ToSea, [switch]$SeaJoin, [switch]$Keep)
 
 $game = Split-Path $PSScriptRoot -Parent
 $dev2 = Join-Path $game 'Maelstrom_dev2.exe'
@@ -32,7 +33,8 @@ Remove-Item (Join-Path $game 'coopnet.log'), (Join-Path $game 'error.log') -Erro
 if ($NewGame) { $env:COOPNET_NEWGAME = '1' }
 if ($ToMap) { $env:COOPNET_TOMAP = '1' } # both instances press "New game" in the main menu
 if ($TestWorld) { $env:COOPNET_TESTWORLD = '1' }
-if ($ToSea) { $env:COOPNET_TOMAP = '1'; $env:COOPNET_TOSEA = '1' }
+if ($ToSea -or $SeaJoin) { $env:COOPNET_TOMAP = '1'; $env:COOPNET_TOSEA = '1' }
+if ($SeaJoin) { $env:COOPNET_SEAJOIN = '1' }
 $env:COOPNET_TEST = 'host'
 if ($TestSkip) { $env:COOPNET_TESTSKIP = '1' }
 $hostProc = Start-Process (Join-Path $game 'Maelstrom.exe') -WorkingDirectory $game -PassThru
@@ -41,7 +43,7 @@ $env:COOPNET_TEST = 'client'
 Remove-Item Env:COOPNET_TESTSKIP -ErrorAction SilentlyContinue
 if ($TestSkip) { $env:COOPNET_AUTOVOTE = '1' }
 $clientProc = Start-Process $dev2 -WorkingDirectory $game -PassThru
-Remove-Item Env:COOPNET_TEST, Env:COOPNET_NEWGAME, Env:COOPNET_AUTOVOTE, Env:COOPNET_TOMAP, Env:COOPNET_TESTWORLD, Env:COOPNET_TOSEA -ErrorAction SilentlyContinue
+Remove-Item Env:COOPNET_TEST, Env:COOPNET_NEWGAME, Env:COOPNET_AUTOVOTE, Env:COOPNET_TOMAP, Env:COOPNET_TESTWORLD, Env:COOPNET_TOSEA, Env:COOPNET_SEAJOIN -ErrorAction SilentlyContinue
 
 Write-Host "host pid $($hostProc.Id), client pid $($clientProc.Id); waiting $Seconds s (switch between the windows)"
 Start-Sleep $Seconds

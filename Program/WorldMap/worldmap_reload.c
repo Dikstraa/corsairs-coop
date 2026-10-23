@@ -33,7 +33,15 @@ void wdmReloadToSea()
 	WdmAddPlayerGroup();
 	//Добавляем энкоунтеры
 	bool isShipEncounterType;
-	isShipEncounterType = WdmAddEncountersData();
+	if (CoopNet_SeaJoinLogin()) // coop: joining another player's sea scene, no encounters of our own
+	{
+		ReleaseMapEncounters();
+		isShipEncounterType = false;
+	}
+	else
+	{
+		isShipEncounterType = WdmAddEncountersData();
+	}
 	//Отконектим все энкоунтеры от атрибутов и поставим в очередь удаления
 	SendMessage(&worldMap, "l", MSG_WORLDMAP_CREATEENC_RELEASE);
 	//Погодные эффекты

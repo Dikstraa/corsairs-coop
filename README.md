@@ -106,8 +106,15 @@ warring ships, floating barrels) are the same for everybody. Quest encounters an
   are ignored), so a puppet is created where its player is, and when the player leaves the scene it
   sails away and comes back when the player does.
 
+Joining from the world map: a player at sea within 5 map units (its open sea position, or where it
+left the map near an island) is offered in the game log; **F9** (or sailing into its avatar) loads
+this player into that scene, 200 sea units abeam of the other ship. `wdmReloadToSea` then takes the
+scene's frame (`worldMap.island`, `zeroX/Z`, sent with every sea report) from `CoopNet_SeaJoinLogin`
+instead of collecting the map's encounters. The world map only reports a contact with an encounter
+when the ships close in under way, so standing next to an avatar alone doesn't trigger it.
+
 `run_pair.ps1 -NewGame -ToSea`: both instances go from the world map to the sea, the host sets sail
-and ~40 s later returns to the map.
+and ~40 s later returns to the map. `-SeaJoin`: only the host goes; the client joins it from the map.
 
 ## Script API
 

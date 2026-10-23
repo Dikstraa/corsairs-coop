@@ -243,12 +243,13 @@ void CoopNet_TestMap()
 	CoopNet_Log("test: host jumps to x " + fX + ", map says " + worldMap.playerShipX);
 }
 
-// COOPNET_TOSEA=1 (with COOPNET_TOMAP): ~10 s on the map both leave it for the sea, the client 2 map units
+// COOPNET_TOSEA=1 (with COOPNET_TOMAP): ~10 s on the map both leave it for the sea (with COOPNET_SEAJOIN=1 only\r\n// the host; the client stays by the host's avatar and so joins it at sea), the client 2 map units
 // (100 sea units) east of the host; ~10 s later the host sets full sails, ~40 s later it goes back to\r\n// the map.
 void CoopNet_TestSea()
 {
 	if (iCoopNetTestMapTicks == 300 && IsEntity(&worldMap))
 	{
+		if (CoopNet_GetEnv("COOPNET_SEAJOIN") == "1" && CoopNet_State() == COOPNET_CONNECTED) return; // waits on the map by the host's avatar
 		if (CoopNet_State() == COOPNET_CONNECTED) worldMap.playerShipX = stf(worldMap.playerShipX) + 2.0;
 		CoopNet_Log("test: to the sea from map x " + worldMap.playerShipX);
 		wdmReloadToSea();
@@ -382,6 +383,7 @@ void CoopNet_OnGameStarted()
 	CoopNet_ClockRestart();
 	CoopNet_WorldGameStarted();
 	CI_CreateAndSetControls("", "CoopVoteYes", CI_GetKeyCode("VK_F8"), 0, false);
+	CI_CreateAndSetControls("", "CoopJoinSea", CI_GetKeyCode("VK_F9"), 0, false);
 }
 
 #event_handler("Control Activation", "CoopNet_OnControl");
@@ -389,6 +391,7 @@ void CoopNet_OnControl()
 {
 	string sControl = GetEventData();
 	if (sControl == "CoopVoteYes") CoopNet_VoteYes();
+	if (sControl == "CoopJoinSea") CoopNet_SeaJoinOffered();
 }
 
 // ---- time skips ----------------------------------------------------------------

@@ -24,6 +24,7 @@ float fCoopNetMapX = 0.0;
 float fCoopNetMapZ = 0.0;
 float fCoopNetMapAY = 0.0;
 bool bCoopNetAvatarsReady = false;	// stale avatars purged since the map was opened
+float fCoopNetMapOpenedAt = 0.0;	// CoopNet_Seconds when the world map last opened
 
 void CoopNet_PresenceTick()
 {
@@ -198,6 +199,7 @@ void CoopNet_UpdateAvatars()
 	{
 		CoopNet_PurgeAvatarEncounters();
 		bCoopNetAvatarsReady = true;
+		fCoopNetMapOpenedAt = CoopNet_Seconds();
 	}
 	int iMe = CoopNet_MyId();
 	aref arPlayers;

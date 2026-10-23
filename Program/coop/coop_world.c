@@ -33,6 +33,7 @@ void CoopNet_WorldGameStarted()
 	iCoopNetWorldScan = 0;
 	CoopNet_EncWorldStarted();
 	CoopNet_HeroGameStarted();
+	CoopNet_RulesWorldStarted();
 	// host: every key differs from the empty snapshots, so the new world goes out to everybody
 	if (CoopNet_State() == COOPNET_CONNECTED) CoopNet_WorldRequest();
 }

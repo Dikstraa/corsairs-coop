@@ -85,6 +85,7 @@ native int CoopNet_SetLocalRate(float gameSecondsPerSecond);
 native float CoopNet_Seconds();
 native int CoopNet_Invite();
 native string CoopNet_MyUid();
+native string CoopNet_NewestFile(string dir);
 
 #library "COOPNET"
 
@@ -180,6 +181,12 @@ bool CoopNet_StartHosting()
 	if (!CoopNet_Host(iCoopNetAutoPort, iCoopNetAutoMax, sCoopNetAutoName)) return false;
 	CoopNet_Notice("Кооператив: игра создана, друзья могут подключиться");
 	return true;
+}
+
+// From the main menu's start (INTERFACE/mainmenu.c): GameOver cleared the event handlers on the way.
+void CoopNet_MainMenuShown()
+{
+	if (bCoopNetTicking) CoopNet_StartTick();
 }
 
 // The co-op button of the Esc menu (INTERFACE/game_menu.c): opens the Steam overlay's invite dialog.
@@ -445,6 +452,57 @@ void CoopNet_TestHero()
 		iCoopNetTestHeroTicks = -1;
 	}
 }
+int iCoopNetTestRulesTicks = 0;
+
+// COOPNET_RULESTEST=1: the host goes to Bridgetown and, once it keeps the client's hero, saves; the
+// client gets 777 gold, plays "boarding" for ~10 s (the host must pause), then dies: the host loads its
+// save and the client comes back with the hero that save keeps.
+void CoopNet_TestRules()
+{
+	if (iCoopNetTestRulesTicks < 0 || CoopNet_GetEnv("COOPNET_RULESTEST") != "1") return;
+	if (CurrentInterface == INTERFACE_CREATE_CHARACTER) Event("InterfaceBreak"); // its open screen blocks saving and the death screen
+	int iState = CoopNet_State();
+	if (iState == COOPNET_HOSTING)
+	{
+		if (!bCoopNetWorldInGame) return;
+		iCoopNetTestRulesTicks++;
+		if (iCoopNetTestRulesTicks == 100) DoReloadCharacterToLocation("Bridgetown_town", "reload", "reload1");
+		if (iCoopNetTestRulesTicks > 600 && GetAttributesNum(&CoopNetGuests) > 0)
+		{
+			CoopNet_Log("test: host saves, " + GetAttributesNum(&CoopNetGuests) + " heroes kept, in " + pchar.location);
+			if (!CheckAttribute(&PlayerProfile, "name")) PlayerProfile.name = "Player"; // the skipped hero selection sets it
+			MakeAutoSave(); // no save-place rules, unlike the quick save
+			iCoopNetTestRulesTicks = -1;
+		}
+		return;
+	}
+	if (iState != COOPNET_CONNECTED || iCoopNetHeroState != 3 || !bCoopNetWorldInGame) return;
+	iCoopNetTestRulesTicks++;
+	if (iCoopNetTestRulesTicks == 100)
+	{
+		pchar.money = 777;
+		DoReloadCharacterToLocation("Bridgetown_town", "reload", "reload1");
+		CoopNet_Log("test: client has 777 gold");
+	}
+	if (iCoopNetTestRulesTicks == 900)
+	{
+		CoopNet_Log("test: client boards");
+		bAbordageStarted = true;
+	}
+	if (iCoopNetTestRulesTicks == 1100)
+	{
+		CoopNet_Log("test: client boarding over");
+		bAbordageStarted = false;
+	}
+	if (iCoopNetTestRulesTicks == 1300)
+	{
+		pchar.money = 5;
+		CoopNet_Log("test: client dies with 5 gold");
+		iCoopNetTestRulesTicks = -1;
+		GameOver("land");
+	}
+}
+
 // COOPNET_TESTSKIP=1: ~10 s into the game this player sleeps 8 hours through WaitDate.
 void CoopNet_TestSkip()
 {
@@ -529,6 +587,7 @@ void CoopNet_Tick()
 	CoopNet_EncTick();
 	CoopNet_SeaTick();
 	CoopNet_HeroTick();
+	CoopNet_RulesTick();
 	CoopNet_LogClock();
 	CoopNet_TestNewGame();
 	CoopNet_TestSkip();
@@ -536,6 +595,7 @@ void CoopNet_Tick()
 	CoopNet_TestWorld();
 	CoopNet_TestMenu();
 	CoopNet_TestHero();
+	CoopNet_TestRules();
 	int iType = CoopNet_Recv();
 	while (iType != 0)
 	{
@@ -569,6 +629,7 @@ void CoopNet_OnLocationUnload()
 void CoopNet_OnGameStarted()
 {
 	CoopNet_ClockRestart();
+	if (bCoopNetTicking) CoopNet_StartTick(); // a game start clears the event handlers
 	CoopNet_WorldGameStarted();
 	CI_CreateAndSetControls("", "CoopVoteYes", CI_GetKeyCode("VK_F8"), 0, false);
 	CI_CreateAndSetControls("", "CoopJoinSea", CI_GetKeyCode("VK_F9"), 0, false);
@@ -726,6 +787,7 @@ void CoopNet_Dispatch(int iType)
 	if (CoopNet_WorldDispatch(iType, iFrom)) return;
 	if (CoopNet_EncDispatch(iType, iFrom)) return;
 	if (CoopNet_HeroDispatch(iType, iFrom)) return;
+	if (CoopNet_RulesDispatch(iType, iFrom)) return;
 	if (iType == COOPNET_MSG_SEA)
 	{
 		CoopNet_OnSea(iFrom);
@@ -749,6 +811,11 @@ void CoopNet_Dispatch(int iType)
 	if (iType == COOPNET_MSG_SEA_DAMAGE)
 	{
 		CoopNet_OnSeaDamage(iFrom);
+		return;
+	}
+	if (iType == COOPNET_MSG_SEA_TAKEN)
+	{
+		CoopNet_OnSeaTaken(iFrom);
 		return;
 	}
 
@@ -869,3 +936,4 @@ void CoopNet_Dispatch(int iType)
 #include "coop\coop_encounters.c"
 #include "coop\coop_sea.c"
 #include "coop\coop_heroes.c"
+#include "coop\coop_rules.c"

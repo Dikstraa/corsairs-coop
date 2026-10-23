@@ -34,6 +34,8 @@ object CoopNetHeroMap;		// while applying a pack: c<old index> / s<old ship> = t
 // Client state: 0 not known yet, 1 asked, 2 a returning player (hero coming), 3 the hero is in place
 int iCoopNetHeroState = 0;
 bool bCoopNetHeroReturning = false;		// the host has this player's hero: start a game by itself
+bool bCoopNetHeroReloaded = false;		// the host loaded a game: this player's hero comes from it
+bool bCoopNetHeroNewGame = false;		// start a new game with hero creation (the host's save doesn't know us)
 float fCoopNetHeroUploadAt = 0.0;
 int iCoopNetTreeCount = 0;
 int iCoopNetTreeInPart = 0;
@@ -79,12 +81,21 @@ void CoopNet_OnHeroAnswer()
 	if (CoopNet_State() != COOPNET_CONNECTED) return;
 	if (!iHas)
 	{
+		if (bCoopNetHeroReloaded)
+		{
+			bCoopNetHeroReloaded = false;
+			CoopNet_Log("hero: the host's save doesn't know us, a new hero");
+			CoopNet_Notice("Кооператив: в этом сохранении хоста вас ещё нет - создайте героя");
+			CoopNet_HeroNewGame();
+			return;
+		}
 		CoopNet_Log("hero: the host has no hero of ours");
 		if (bCoopNetWorldInGame && bCoopNetWorldSynced) CoopNet_HeroInPlace(); // a new hero: it starts here
 		else iCoopNetHeroState = 0;
 		return;
 	}
 	CoopNet_Log("hero: the host keeps our hero");
+	bCoopNetHeroReloaded = false;
 	bCoopNetHeroReturning = true;
 	iCoopNetHeroState = 2;
 	if (bCoopNetWorldInGame)
@@ -128,6 +139,28 @@ void CoopNet_HeroWorldArrived()
 	if (iCoopNetHeroState == 0) CoopNet_HeroConnected();
 }
 
+// The host started or loaded a game: this player's hero is the one that game keeps (or a new one).
+void CoopNet_HeroWorldReloaded()
+{
+	CoopNet_Log("hero: the host loaded a game, our hero comes from it");
+	CoopNet_HeroConnected();
+	bCoopNetHeroReloaded = true;
+}
+
+// A new game with the usual hero creation: from the main menu as its New Game button does, in a game
+// through the same interface command.
+void CoopNet_HeroNewGame()
+{
+	if (bCoopNetWorldInGame)
+	{
+		interfaceResultCommand = RC_INTERFACE_DO_NEW_GAME;
+		InterfaceStates.doUnFreeze = false;
+		SetEventHandler("frame", "InterfaceDoExit", 0);
+		return;
+	}
+	bCoopNetHeroNewGame = true; // when the main menu is up
+}
+
 // A new or loaded game here: the host's kept hero (if any) replaces its hero once the world is in.
 void CoopNet_HeroGameStarted()
 {
@@ -159,10 +192,21 @@ void CoopNet_HeroTick()
 		{
 			iCoopNetHeroState = 0;
 			bCoopNetHeroReturning = false;
+			bCoopNetHeroReloaded = false;
+			bCoopNetHeroNewGame = false;
 		}
 		return;
 	}
 	CoopNet_HeroAutoStart();
+	if (bCoopNetHeroNewGame && !bCoopNetWorldInGame && CurrentInterface == INTERFACE_MAINMENU)
+	{
+		bCoopNetHeroNewGame = false;
+		CoopNet_Log("hero: starting a new game");
+		InterfaceStates.BackEnvironmentIsCreated = true;
+		DelEventHandler("backgroundcommand", "ProcCommand");
+		interfaceResultCommand = RC_INTERFACE_DO_NEW_GAME;
+		EndCancelInterface(true);
+	}
 	CoopNet_HeroSkipCreation();
 	if (iCoopNetHeroState != 3 || !bCoopNetWorldInGame) return;
 	if (iCoopNetMode == COOPNET_MODE_MENU || CoopNet_Seconds() < fCoopNetHeroUploadAt) return;

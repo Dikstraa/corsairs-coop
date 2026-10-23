@@ -1969,6 +1969,7 @@ void GameOverE()
 
 void GameOver(string sName)
 {
+	if (CoopNet_GameOver(sName)) return; // co-op: the host rolls the whole world back instead
 	ref mc;
 	int nSelect;
 	string sFileName;

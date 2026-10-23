@@ -7,7 +7,7 @@
 // slightly ahead of the player (encounters start from a standstill) and re-created when it drifts
 // too far or the course changes.
 
-#define COOPNET_MSG_PRESENCE		110		// int id, int mode, int hasMap, float x, float z, float ay, string place, string name
+#define COOPNET_MSG_PRESENCE		110		// int id, int mode, int hasMap, float x, float z, float ay, string place, string name, int busy (boarding)
 #define COOPNET_PRESENCE_TICKS		10		// send every 10 ticks = 0.5 s
 #define COOPNET_PRESENCE_PERIOD		0.5
 #define COOPNET_PRESENCE_STALE		20		// periods without news (10 s) before a player is dropped
@@ -17,7 +17,7 @@
 #define COOPNET_AVATAR_SPEED_UNIT	14.8	// encounter speed at kSpeed 1 (measured)
 #define COOPNET_AVATAR_LEAD			1.5		// seconds ahead an avatar starts, to make up for accelerating
 
-object CoopNetPlayers;	// p<id>: id, name, mode, hasMap, x, z, ay, vx, vz, place, age; enc* while an avatar exists
+object CoopNetPlayers;	// p<id>: id, name, mode, hasMap, x, z, ay, vx, vz, place, busy, age; enc* while an avatar exists
 int iCoopNetPresenceTicks = 0;
 bool bCoopNetHasMapPos = false;
 float fCoopNetMapX = 0.0;
@@ -50,6 +50,8 @@ void CoopNet_PresenceTick()
 		string sPlace = CoopNet_PresencePlace();
 		CoopNet_AgePresence();
 		CoopNet_StorePresence(iMe, iCoopNetMode, bCoopNetHasMapPos, fCoopNetMapX, fCoopNetMapZ, fCoopNetMapAY, sPlace, sName);
+		string sMe = "p" + iMe;
+		CoopNetPlayers.(sMe).busy = bAbordageStarted;
 		if (iState == COOPNET_HOSTING) CoopNet_BroadcastPresence();
 		else CoopNet_SendPresence(iMe, COOPNET_HOST_ID);
 	}
@@ -153,6 +155,9 @@ void CoopNet_SendPresence(int iId, int iTo)
 	CoopNet_PutFloat(stf(arP.ay));
 	CoopNet_PutString(arP.place);
 	CoopNet_PutString(arP.name);
+	int iBusy = 0;
+	if (CheckAttribute(arP, "busy")) iBusy = sti(arP.busy);
+	CoopNet_PutInt(iBusy);
 	CoopNet_Send(iTo, COOPNET_UNRELIABLE);
 }
 
@@ -179,9 +184,12 @@ void CoopNet_OnPresence(int iFrom)
 	float fAY = CoopNet_GetFloat();
 	string sPlace = CoopNet_GetString();
 	string sName = CoopNet_GetString();
+	int iBusy = CoopNet_GetInt();
 	if (iId == CoopNet_MyId()) return;
 	if (CoopNet_State() == COOPNET_HOSTING && iId != iFrom) return; // clients speak only for themselves
 	CoopNet_StorePresence(iId, iMode, iHasMap, fX, fZ, fAY, sPlace, sName);
+	string sKey = "p" + iId;
+	CoopNetPlayers.(sKey).busy = iBusy;
 }
 
 // ---- avatars on the world map ----------------------------------------------------

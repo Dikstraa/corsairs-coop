@@ -2601,6 +2601,7 @@ void ShipDead(int iDeadCharacterIndex, int iKillStatus, int iKillerCharacterInde
 // boal -->
 void ShipTaken(int iDeadCharacterIndex, int iKillStatus, int iKillerCharacterIndex)
 {
+	CoopNet_SeaShipTaken(iDeadCharacterIndex, iKillStatus, iKillerCharacterIndex); // co-op: another player's ship: its machine loses it
 	ref rDead, rKillerCharacter, rMainCharacter, rBaseShip, rKillerBaseShip;
 
 	rDead = GetCharacter(iDeadCharacterIndex);
@@ -2655,6 +2656,7 @@ void ShipTaken(int iDeadCharacterIndex, int iKillStatus, int iKillerCharacterInd
 // захваченный корабль, отпущен
 void ShipTakenFree(int iDeadCharacterIndex, int iKillStatus, int iKillerCharacterIndex)
 {
+	CoopNet_SeaShipTaken(iDeadCharacterIndex, iKillStatus, iKillerCharacterIndex); // co-op: another player's ship: its machine loses it
 	ref rDead, rKillerCharacter, rMainCharacter, rBaseShip, rKillerBaseShip;
 
 	rDead = GetCharacter(iDeadCharacterIndex);

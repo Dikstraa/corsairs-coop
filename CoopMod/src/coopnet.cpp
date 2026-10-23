@@ -23,7 +23,7 @@ using namespace mael;
 namespace
 {
 
-constexpr long kVersion = 6;
+constexpr long kVersion = 7;
 
 // Message types 10..99 are handled inside the DLL and never reach scripts.
 enum : uint16_t
@@ -208,6 +208,34 @@ DWORD __cdecl N_Invite(VS_STACK *s)
 DWORD __cdecl N_MyUid(VS_STACK *s)
 {
     return Return(s, Net().LocalUid());
+}
+
+// string CoopNet_NewestFile(string dir)  name of the most recently written file in dir ("" if none):
+// the latest save, for rolling the world back
+DWORD __cdecl N_NewestFile(VS_STACK *s)
+{
+    std::string dir = ArgString(Pop(s));
+    if (!dir.empty() && dir.back() != '\\' && dir.back() != '/')
+        dir += '\\';
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA((dir + "*").c_str(), &fd);
+    std::string best;
+    FILETIME bestTime = {};
+    if (h != INVALID_HANDLE_VALUE)
+    {
+        do
+        {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                continue;
+            if (best.empty() || CompareFileTime(&fd.ftLastWriteTime, &bestTime) > 0)
+            {
+                best = fd.cFileName;
+                bestTime = fd.ftLastWriteTime;
+            }
+        } while (FindNextFileA(h, &fd));
+        FindClose(h);
+    }
+    return Return(s, best);
 }
 
 // int CoopNet_UseUdp()  switch to the direct UDP transport (LAN, VPN, forwarded port)
@@ -950,6 +978,7 @@ const Native kNatives[] = {
     {"CoopNet_Seconds", "float", 0, N_Seconds},
     {"CoopNet_Invite", "int", 0, N_Invite},
     {"CoopNet_MyUid", "string", 0, N_MyUid},
+    {"CoopNet_NewestFile", "string", 1, N_NewestFile},
 };
 
 class COOPNET : public SCRIPT_LIBRIARY

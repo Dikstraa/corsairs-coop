@@ -109,6 +109,30 @@ other characters or global objects of the client's own game does not.
 `run_pair.ps1 -NewGame -TestHero`: the client goes to Bridgetown, gets 12345 gold, is restarted and
 comes back with them there.
 
+## Death, rollback and boarding
+
+`Program/coop/coop_rules.c`:
+
+- A player's death rolls the whole world back. `GameOver` (seadogs.c) asks `CoopNet_GameOver` first:
+  a client tells the host and goes through the usual death screen to the main menu; the host loads
+  its latest save (`CoopNet_NewestFile` on its save folder) a few seconds later, or at once when it
+  is the host that died.
+- Whatever game the host starts or loads (also a save it picks itself), it tells everybody: the
+  world is sent again and every client asks for its hero, which comes from that save
+  (`CoopNetGuests` is saved with it). A client the save doesn't know yet starts a new game with the
+  usual hero creation.
+- While any other player boards (`bAbordageStarted`, sent with the presence), this player's game
+  stands still (time scale 0, held every tick since menus reset it) until the boarding is over.
+- A puppet taken by boarding (`ShipTaken`, `ShipTakenFree`, or sunk by `ShipDead` here) is reported
+  to its own machine, which loses that ship with this player as its killer; the taken character
+  stops being a puppet here.
+- The script tick is re-registered at every game start and when the main menu opens, since loads
+  and the game over clear the event handlers.
+
+`run_pair.ps1 -NewGame -TestRules`: the host saves once it keeps the client's hero, the client
+"boards" for ~10 s (the host pauses), then dies; the host loads its save and the client comes back
+with the hero that save keeps.
+
 ## Shared ships on the world map
 
 `Program/coop/coop_encounters.c`: the random ships of the world map (merchants, patrols, pirates,

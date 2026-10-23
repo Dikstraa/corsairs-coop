@@ -21,6 +21,7 @@
 #define COOPNET_MSG_SEA_SINK	133		// int owner, int ship, int killStatus, int killer, int killerShip (-1: nobody)
 #define COOPNET_MSG_SEA_SHOTS	134		// int owner, int n, n x (int ship, float x, y, z, dir, speed, angle, int cannonType, string charge, float height, size, time, maxDistance)
 #define COOPNET_MSG_SEA_DAMAGE	135		// int owner, int ship, int kind (1 crew, 2 crew by a cannon ball), float amount, float multiply, int ballType, int attacker
+#define COOPNET_MSG_SEA_TAKEN	136		// int owner, int ship, int killStatus, int taker, int takerShip: boarded and taken
 #define COOPNET_SEA_FLEET		1		// ship flags: a companion in the player's own fleet
 #define COOPNET_SEA_FLAGSHIP	2		// the player's own ship (flags 0: an NPC ship)
 #define COOPNET_SEA_TICKS		5		// report every 5 ticks = 0.25 s
@@ -391,20 +392,30 @@ int CoopNet_SeaRelation(aref arS)
 	return GetNationRelation2MainCharacter(iNation);
 }
 
-// Applies the puppet's sides to the ships this machine runs, when they changed.
+// Applies the puppet's sides, when they or the ships in the scene changed. Relations are one-way:
+// the ships this machine runs see the puppet as friend or enemy by the flags, while the puppet sees
+// everybody as a friend, so the engine's AI never steers it away from "enemies" (it would leave
+// where its real ship is).
 void CoopNet_SeaSides(aref arS)
 {
 	int iRel = CoopNet_SeaRelation(arS);
 	int iChr = sti(arS.chr);
 	Characters[iChr].nation = arS.nation;
-	if (iRel == sti(arS.rel)) return;
+	if (iRel == sti(arS.rel) && CheckAttribute(arS, "relShips") && sti(arS.relShips) == iNumShips) return;
+	bool bChanged = iRel != sti(arS.rel);
 	arS.rel = iRel;
+	arS.relShips = iNumShips;
 	int iNation = sti(arS.nation);
 	for (int i = 0; i < iNumShips; i++)
 	{
 		int iOther = Ships[i];
 		if (iOther < 0 || iOther == iChr || !CheckAttribute(&Characters[iOther], "Ship.Type")) continue;
-		if (CheckAttribute(&Characters[iOther], "coopPuppet")) continue;
+		SetCharacterRelation(iChr, iOther, RELATION_FRIEND);
+		if (CheckAttribute(&Characters[iOther], "coopPuppet"))
+		{
+			SetCharacterRelation(iOther, iChr, RELATION_FRIEND);
+			continue;
+		}
 		int iOtherRel = iRel; // this player's fleet sides with its flag
 		bool bMine = iOther == nMainCharacterIndex;
 		if (CheckAttribute(&Characters[iOther], "SeaAI.Group.Name") && Characters[iOther].SeaAI.Group.Name == PLAYER_GROUP) bMine = true;
@@ -413,12 +424,11 @@ void CoopNet_SeaSides(aref arS)
 			iOtherRel = GetNationRelation(iNation, sti(Characters[iOther].nation));
 			if (iNation == sti(Characters[iOther].nation)) iOtherRel = RELATION_FRIEND;
 		}
-		SetCharacterRelationBoth(iChr, iOther, iOtherRel);
+		SetCharacterRelation(iOther, iChr, iOtherRel);
 	}
 	UpdateRelations();
-	CoopNet_Log("sea: " + Characters[iChr].id + " is now " + GetRelationName(iRel) + " to this player");
+	if (bChanged) CoopNet_Log("sea: " + Characters[iChr].id + " is now " + GetRelationName(iRel) + " to this player");
 }
-
 // The puppet sails for a point ahead of the real ship; its top speed is the ship's speed plus a
 // share of the distance it is behind (Ship_UpdateParameters takes it from coopSpeed), so it catches
 // up and doesn't overshoot; with the goal off the bow it slows down to turn short. (Ships in a running sea scene can't be moved or removed: neither
@@ -630,6 +640,60 @@ void CoopNet_OnSeaDamage(int iFrom)
 	if (iKind == 2) Ship_ApplyCrewHitpointsWithCannon(rShip, fAmount, fMultiply, iBallType);
 	CoopNet_Log("sea: " + rShip.id + " crew hit by player " + iAttacker + ": " + fAmount + ", crew " + rShip.Ship.Crew.Quantity);
 }
+// Boarding a puppet: the ship is taken (or sunk) here, its own machine loses it with this player as
+// the one who finished it. The taken character stops being a puppet here and becomes an ordinary one.
+bool bCoopNetSeaSinking = false;	// ShipDead runs for a sinking another machine reported
+
+// From ShipTaken / ShipTakenFree, and from ShipDead for a puppet this machine sank itself.
+void CoopNet_SeaShipTaken(int iDead, int iKillStatus, int iKiller)
+{
+	if (iDead < 0 || !CheckAttribute(&Characters[iDead], "coopPuppet")) return;
+	ref rDead = &Characters[iDead];
+	int iOwner = sti(rDead.coopPuppet);
+	int iShip = sti(rDead.coopIdx);
+	string sPath = "p" + iOwner + ".ships.s" + iShip;
+	if (CheckAttribute(&CoopNetSea, sPath)) CoopNetSea.(sPath).sunk = true;
+	CoopNet_Log("sea: took " + rDead.id + " (ship " + iShip + " of player " + iOwner + ")");
+	CoopNet_Begin(COOPNET_MSG_SEA_TAKEN);
+	CoopNet_PutInt(iOwner);
+	CoopNet_PutInt(iShip);
+	CoopNet_PutInt(iKillStatus);
+	CoopNet_PutInt(CoopNet_MyId());
+	CoopNet_PutInt(iKiller);
+	CoopNet_SeaSendTo(iOwner);
+	DeleteAttribute(rDead, "coopPuppet");
+	DeleteAttribute(rDead, "coopIdx");
+	DeleteAttribute(rDead, "coopSpeed");
+	rDead.id = "CoopTaken_" + iOwner + "_" + iShip + "_" + rand(99999); // the puppet id is free again
+}
+
+void CoopNet_OnSeaTaken(int iFrom)
+{
+	int iOwner = CoopNet_GetInt();
+	int iShip = CoopNet_GetInt();
+	int iStatus = CoopNet_GetInt();
+	int iTaker = CoopNet_GetInt();
+	int iTakerShip = CoopNet_GetInt();
+	if (iOwner != CoopNet_MyId())
+	{
+		if (CoopNet_State() != COOPNET_HOSTING) return;
+		CoopNet_Begin(COOPNET_MSG_SEA_TAKEN);
+		CoopNet_PutInt(iOwner);
+		CoopNet_PutInt(iShip);
+		CoopNet_PutInt(iStatus);
+		CoopNet_PutInt(iTaker);
+		CoopNet_PutInt(iTakerShip);
+		CoopNet_Send(iOwner, COOPNET_RELIABLE);
+		return;
+	}
+	if (!bSeaActive || !CoopNet_SeaOwnShip(iShip)) return;
+	ref rShip = &Characters[iShip];
+	CoopNet_Log("sea: " + rShip.id + " was taken by player " + iTaker);
+	rShip.coopLastHit.player = iTaker;
+	rShip.coopLastHit.ship = iTakerShip;
+	rShip.Ship.HP = 0.0;
+	ShipDead(iShip, iStatus, -1);
+}
 // From ShipDead: a ship this machine runs sank; everybody learns who finished it.
 void CoopNet_SeaShipDead(int iDead, int iKillStatus, int iKiller)
 {
@@ -637,7 +701,12 @@ void CoopNet_SeaShipDead(int iDead, int iKillStatus, int iKiller)
 	if (iState != COOPNET_CONNECTED && iState != COOPNET_HOSTING) return;
 	if (!bSeaActive || iDead < 0) return;
 	ref rDead = &Characters[iDead];
-	if (CheckAttribute(rDead, "coopPuppet")) return; // its own machine told us
+	if (CheckAttribute(rDead, "coopPuppet"))
+	{
+		// sunk here by its own machine's report, or taken here (a boarding that ended in sinking it)
+		if (!bCoopNetSeaSinking) CoopNet_SeaShipTaken(iDead, iKillStatus, iKiller);
+		return;
+	}
 	int iKillerPlayer = CoopNet_MyId();
 	int iKillerShip = iKiller;
 	if (iKiller >= 0)
@@ -709,7 +778,9 @@ void CoopNet_OnSeaSink(int iFrom)
 	CoopNet_Log("sea: " + rChr.id + " sank, killer here " + iKillerHere);
 	DeleteAttribute(rChr, "coopSpeed");
 	rChr.Ship.HP = 0.0;
+	bCoopNetSeaSinking = true;
 	ShipDead(iChr, iStatus, iKillerHere);
+	bCoopNetSeaSinking = false;
 }
 // ---- cannon balls -----------------------------------------------------------------------------
 // Every ball a ship of this machine fires (Ball_AddBall, after the shooter's dispersion) is queued

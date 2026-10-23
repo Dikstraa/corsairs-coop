@@ -27,6 +27,7 @@ void TempIControlProcess()
 
 void InitInterface(string iniName)
 {
+	CoopNet_MainMenuShown(); // co-op: keep the network going after a game over
 	Event("DoInfoShower","sl","MainMenuLaunch",false);
 
 	aref arScrShoter;

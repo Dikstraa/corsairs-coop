@@ -31,6 +31,7 @@
 #include "ITEMS\itemLogic.c"
 #include "ITEMS\items_utilite.c"
 #include "net\net.c"
+#include "coop\coopnet.c"
 #include "store\store.h"
 #include "interface\interface.c"
 #include "OnLoadReinit.c"
@@ -289,6 +290,7 @@ void proc_break_video()
 
 void Main()
 {
+	CoopNet_SelfTest();
 	if (!CheckAttribute(InterfaceStates,"VISUAL_CIRASS")) InterfaceStates.VISUAL_CIRASS = 0;
 	screenscaling = BI_COMPARE_HEIGHT;
     LayerCreate("realize", 1);

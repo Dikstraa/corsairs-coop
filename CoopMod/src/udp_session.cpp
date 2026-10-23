@@ -17,6 +17,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdarg>
+#include <cstdio>
 #include <chrono>
 #include <deque>
 #include <map>
@@ -701,5 +703,21 @@ class UdpSession final : public Session
 } // namespace
 
 std::unique_ptr<Session> CreateUdpSession() { return std::make_unique<UdpSession>(); }
+
+static void (*g_sessionLog)(const char *) = nullptr;
+
+void SetSessionLog(void (*log)(const char *line)) { g_sessionLog = log; }
+
+void SessionLog(const char *fmt, ...)
+{
+    if (!g_sessionLog)
+        return;
+    char line[512];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(line, sizeof line, fmt, args);
+    va_end(args);
+    g_sessionLog(line);
+}
 
 } // namespace coopnet

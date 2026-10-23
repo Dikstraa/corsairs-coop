@@ -78,12 +78,16 @@ native int CoopNet_ClockRestart();
 native int CoopNet_SkipVoting();
 native int CoopNet_RequestSkip(int minutes, string continuation);
 native int CoopNet_VoteYes();
+native int CoopNet_UseSteam();
+native int CoopNet_UseUdp();
+native string CoopNet_Config(string key);
 
 #library "COOPNET"
 
 #event_handler("CoopNet_Tick", "CoopNet_Tick");
 
 bool bCoopNetTicking = false;
+bool bCoopNetSteam = false; // Steam transport: keep ticking while offline so accepted invites are noticed
 
 void CoopNet_Init()
 {
@@ -101,7 +105,57 @@ void CoopNet_Init()
 		if (CoopNet_Connect("127.0.0.1", COOPNET_DEFAULT_PORT, "TestClient")) CoopNet_StartTick();
 		else CoopNet_Log("connect failed: " + CoopNet_LastError());
 	}
+	if (sTest == "steamhost" || sTest == "steamjoin")
+	{
+		bCoopNetSteam = CoopNet_UseSteam();
+		if (!bCoopNetSteam) CoopNet_Log("steam unavailable: " + CoopNet_LastError());
+		if (bCoopNetSteam && sTest == "steamhost") CoopNet_Host(0, 4, "");
+		if (bCoopNetSteam && sTest == "steamjoin") CoopNet_Connect("", 0, "");
+		CoopNet_StartTick();
+	}
+	if (sTest == "") CoopNet_StartFromConfig();
 	if (CoopNet_GetEnv("COOPNET_NEWGAME") == "1") PostEvent("CoopNet_TestNewGame", 1000);
+}
+
+// coop.ini next to Maelstrom.exe:
+//   [coop]
+//   mode=host | join | off
+//   transport=steam | udp
+//   address=   udp: host IP; steam: empty = a friend's game, part of the host's name, or lobby:<id>
+//   port=47600   (udp)
+//   maxplayers=4 (host)
+//   name=        empty = Steam name
+void CoopNet_StartFromConfig()
+{
+	string sMode = CoopNet_Config("mode");
+	string sTransport = CoopNet_Config("transport");
+	if (sTransport == "steam")
+	{
+		if (!CoopNet_UseSteam())
+		{
+			CoopNet_Log("steam unavailable: " + CoopNet_LastError());
+			return;
+		}
+		bCoopNetSteam = true;
+		CoopNet_StartTick();
+	}
+	if (sMode != "host" && sMode != "join") return;
+
+	int iPort = COOPNET_DEFAULT_PORT;
+	string sValue = CoopNet_Config("port");
+	if (sValue != "") iPort = sti(sValue);
+	int iMax = 4;
+	sValue = CoopNet_Config("maxplayers");
+	if (sValue != "") iMax = sti(sValue);
+	string sName = CoopNet_Config("name");
+	string sAddress = CoopNet_Config("address");
+	if (!bCoopNetSteam && sAddress == "") sAddress = "127.0.0.1";
+
+	bool bOk;
+	if (sMode == "host") bOk = CoopNet_Host(iPort, iMax, sName);
+	else bOk = CoopNet_Connect(sAddress, iPort, sName);
+	if (bOk) CoopNet_StartTick();
+	else CoopNet_Log(sMode + " failed: " + CoopNet_LastError());
 }
 
 // ---- test helpers ------------------------------------------------------------
@@ -170,7 +224,7 @@ void CoopNet_Tick()
 		CoopNet_Dispatch(iType);
 		iType = CoopNet_Recv();
 	}
-	if (CoopNet_State() == COOPNET_OFFLINE)
+	if (CoopNet_State() == COOPNET_OFFLINE && !bCoopNetSteam)
 	{
 		bCoopNetTicking = false;
 		return;
@@ -275,13 +329,17 @@ float CoopNet_WorldMapTimeHook(float fTime)
 float CoopNet_TimeHook(float fTime, int iSource)
 {
 	int iState = CoopNet_State();
-	if (iState != COOPNET_CONNECTED && iState != COOPNET_HOSTING) return fTime;
-	if (CoopNet_TickAge() > 1000)
+	bool bInSession = false;
+	if (iState == COOPNET_CONNECTED || iState == COOPNET_HOSTING) bInSession = true;
+	bool bNeedTick = bInSession;
+	if (bCoopNetSteam) bNeedTick = true;
+	if (bNeedTick && CoopNet_TickAge() > 1000)
 	{
 		// ClearEvents() (game load, teleport) dropped the posted tick
 		bCoopNetTicking = false;
 		CoopNet_StartTick();
 	}
+	if (!bInSession) return fTime;
 
 	float fHours = CoopNet_ClockEngine(GetDataYear(), GetDataMonth(), GetDataDay(), fTime, iSource);
 	int iDaysAhead = CoopNet_ClockDaysAhead();

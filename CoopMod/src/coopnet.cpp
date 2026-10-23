@@ -78,12 +78,17 @@ double RealNow()
     return duration<double>(steady_clock::now().time_since_epoch()).count();
 }
 
-// Created on first use and intentionally never destroyed: joining the network thread from a
-// static destructor would run under the loader lock.
+// Sessions are created on first use and intentionally never destroyed: joining the network thread
+// from a static destructor would run under the loader lock.
+coopnet::Session *g_udp = nullptr;
+coopnet::Session *g_steam = nullptr;
+coopnet::Session *g_active = nullptr;
+
 coopnet::Session &Net()
 {
-    static coopnet::Session *session = coopnet::CreateUdpSession().release();
-    return *session;
+    if (!g_active)
+        g_active = g_udp = coopnet::CreateUdpSession().release();
+    return *g_active;
 }
 
 void Log(const char *fmt, ...)
@@ -167,6 +172,50 @@ DWORD __cdecl N_Connect(VS_STACK *s)
     else
         Log("connect to %s:%ld failed: %s", host.c_str(), port, g_lastError.c_str());
     return Return(s, ok ? 1L : 0L);
+}
+
+// int CoopNet_UseSteam()  switch to the Steam (Spacewar) transport; 0 if Steam isn't available
+DWORD __cdecl N_UseSteam(VS_STACK *s)
+{
+    if (!g_steam)
+    {
+        auto steam = coopnet::CreateSteamSession(g_lastError);
+        if (!steam)
+        {
+            Log("steam unavailable: %s", g_lastError.c_str());
+            return Return(s, 0L);
+        }
+        g_steam = steam.release();
+        Log("steam: ready");
+    }
+    if (g_active != g_steam)
+    {
+        Net().Disconnect();
+        g_active = g_steam;
+    }
+    return Return(s, 1L);
+}
+
+// int CoopNet_UseUdp()  switch to the direct UDP transport (LAN, VPN, forwarded port)
+DWORD __cdecl N_UseUdp(VS_STACK *s)
+{
+    if (g_active && g_active != g_udp)
+    {
+        Net().Disconnect();
+        g_active = nullptr; // Net() recreates/reuses UDP
+        if (g_udp)
+            g_active = g_udp;
+    }
+    return Return(s, 1L);
+}
+
+// string CoopNet_Config(string key)  value from [coop] in coop.ini next to Maelstrom.exe, "" if absent
+DWORD __cdecl N_Config(VS_STACK *s)
+{
+    std::string key = ArgString(Pop(s));
+    char buf[256] = {};
+    GetPrivateProfileStringA("coop", key.c_str(), "", buf, sizeof buf, ".\\coop.ini");
+    return Return(s, std::string(buf));
 }
 
 // int CoopNet_Disconnect()
@@ -858,6 +907,9 @@ const Native kNatives[] = {
     {"CoopNet_SkipVoting", "int", 0, N_SkipVoting},
     {"CoopNet_RequestSkip", "int", 2, N_RequestSkip},
     {"CoopNet_VoteYes", "int", 0, N_VoteYes},
+    {"CoopNet_UseSteam", "int", 0, N_UseSteam},
+    {"CoopNet_UseUdp", "int", 0, N_UseUdp},
+    {"CoopNet_Config", "string", 1, N_Config},
 };
 
 class COOPNET : public SCRIPT_LIBRIARY
@@ -897,8 +949,18 @@ COOPNETvmacd g_coopnetClass(g_moduleClassRoot);
 
 } // namespace
 
+#ifndef COOPNET_STEAM
+// Built without the Steamworks SDK (CoopMod/steamworks_sdk is not in git): UDP only.
+std::unique_ptr<coopnet::Session> coopnet::CreateSteamSession(std::string &err)
+{
+    err = "built without the Steamworks SDK";
+    return nullptr;
+}
+#endif
+
 extern "C" __declspec(dllexport) VMA *__cdecl DMAInterface(VAPI *api, VSYSTEM_API *)
 {
     g_api = api;
+    coopnet::SetSessionLog([](const char *line) { Log("%s", line); });
     return g_moduleClassRoot;
 }

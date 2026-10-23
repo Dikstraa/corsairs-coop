@@ -74,6 +74,16 @@ class Session
     virtual void SetSimulatedLoss(float fraction) = 0;
 };
 
+// Optional diagnostics sink for transports (set by the DLL to its coopnet.log).
+void SetSessionLog(void (*log)(const char *line));
+void SessionLog(const char *fmt, ...);
+
 std::unique_ptr<Session> CreateUdpSession();
+
+// Steam (Spacewar) transport; nullptr with err set when Steam isn't available.
+// Host() ignores the port; Connect() takes "" (a friend's lobby, else any), "lobby:<id>" or part
+// of the host's name instead of an address. Poll() must be called regularly, even while offline,
+// so that accepted Steam invites are noticed.
+std::unique_ptr<Session> CreateSteamSession(std::string &err);
 
 } // namespace coopnet

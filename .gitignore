@@ -11,3 +11,4 @@
 /CoopMod/build/
 *.coop_backup
 *.log
+/CoopMod/steamworks_sdk/

@@ -1,0 +1,15 @@
+; Copy next to Maelstrom.exe as coop.ini and edit.
+[coop]
+; host = create a game, join = connect to one, off = single player
+mode=host
+; steam = over the internet through Steam (Spacewar), udp = LAN / VPN / forwarded port
+transport=steam
+; steam: empty = a friend's game (else any open one), or a part of the host's name
+; udp:   the host's IP address
+address=
+; udp only
+port=47600
+; host only: players besides the host
+maxplayers=3
+; empty = your Steam name
+name=

@@ -21,6 +21,19 @@ come from an installed copy of the Ship Pack: clone this repo over the game fold
 - `Program/` — game scripts. The first commit is the unmodified Ship Pack; later commits are mod changes.
 - `Program/coop/coopnet.c` — script side: constants, native declarations, message tick and dispatch.
 
+## Playing
+
+1. Build (`CoopMod/build.bat`) with the Steamworks SDK unpacked in `CoopMod/steamworks_sdk/`
+   (not in git). It copies `CoopNet.dll` to `modules/` and `steam_api64.dll` next to `Maelstrom.exe`.
+2. Copy `CoopMod/coop.ini.example` next to `Maelstrom.exe` as `coop.ini`: the host sets `mode=host`,
+   the others `mode=join`. With `transport=steam` both need Steam running; the game uses
+   Spacewar (AppID 480) and writes `steam_appid.txt` itself.
+3. Steam: the client finds a lobby hosted by a Steam friend (else any open one), or by part of the
+   host's name in `address`. While the game runs, accepting a Steam invite to the host's lobby joins too.
+
+Steam P2P goes through Valve relays: no port forwarding. Two instances on one PC share a Steam
+account and can't connect to each other over Steam; test those over UDP (`run_pair.ps1`).
+
 ## Script API
 
 ```c
@@ -75,6 +88,7 @@ Test without clicking through menus: `run_pair.ps1 -NewGame` starts both instanc
 - Files compiled before `coop/coopnet.c` can call its functions but can't use its `#define`s.
 - The weather reports time only every few game minutes, so the clock is applied in steps.
 - Script identifiers are case-insensitive: `#define COOPNET_HOST` clashes with `CoopNet_Host()`.
+- A condition can't start with a parenthesized group: `if ((a || b) && c)` fails to compile.
 - `default:` labels are global: `seadogs.c` already has one, a second one fails to compile.
 - `ClearEvents()` (game load, teleport) drops posted events; the CoopNet tick must be restarted after it.
 - Compile errors go to `error.log`; the failing function then misbehaves silently.

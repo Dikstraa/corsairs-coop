@@ -55,6 +55,7 @@ void wdmEvent_UpdateDate()
 	Environment.date.min = worldMap.date.min;
 	Environment.date.sec = worldMap.date.sec;
 	Environment.time = GetEventData();
+	Environment.time = CoopNet_WorldMapTimeHook(stf(Environment.time)); // coop: shared clock
 }
 
 //Добавляем по запросу квестовых энкоунтеров

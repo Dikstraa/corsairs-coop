@@ -28,6 +28,16 @@
 #define COOPNET_DEFAULT_PORT	47600
 #define COOPNET_TICK_MS			50
 
+// CoopNet_SetStatus modes
+#define COOPNET_MODE_MENU		0
+#define COOPNET_MODE_WORLDMAP	1
+#define COOPNET_MODE_SEA		2
+#define COOPNET_MODE_LAND		3
+
+// CoopNet_ClockEngine sources
+#define COOPNET_CLOCK_WORLDMAP	1
+#define COOPNET_CLOCK_WEATHER	2
+
 native int CoopNet_Host(int port, int maxPeers, string name);
 native int CoopNet_Connect(string host, int port, string name);
 native int CoopNet_Disconnect();
@@ -52,6 +62,16 @@ native string CoopNet_GetString();
 native int CoopNet_Version();
 native int CoopNet_Log(string s);
 native string CoopNet_GetEnv(string name);
+native int CoopNet_Update();
+native int CoopNet_TickAge();
+native int CoopNet_SetStatus(int mode, int battle);
+native float CoopNet_ClockEngine(int year, int month, int day, float hours, int source);
+native int CoopNet_ClockYear();
+native int CoopNet_ClockMonth();
+native int CoopNet_ClockDay();
+native int CoopNet_ClockDaysAhead();
+native float CoopNet_ClockRate();
+native int CoopNet_ClockRestart();
 
 #library "COOPNET"
 
@@ -75,6 +95,41 @@ void CoopNet_Init()
 		if (CoopNet_Connect("127.0.0.1", COOPNET_DEFAULT_PORT, "TestClient")) CoopNet_StartTick();
 		else CoopNet_Log("connect failed: " + CoopNet_LastError());
 	}
+	if (CoopNet_GetEnv("COOPNET_NEWGAME") == "1") PostEvent("CoopNet_TestNewGame", 1000);
+}
+
+// ---- test helpers ------------------------------------------------------------
+
+int iCoopNetTestMenuSeen = 0;
+
+#event_handler("CoopNet_TestNewGame", "CoopNet_TestNewGame");
+// Presses "New game" once the main menu has been up for a couple of seconds.
+void CoopNet_TestNewGame()
+{
+	if (CurrentInterface != INTERFACE_MAINMENU || iCoopNetTestMenuSeen < 3)
+	{
+		if (CurrentInterface == INTERFACE_MAINMENU) iCoopNetTestMenuSeen++;
+		PostEvent("CoopNet_TestNewGame", 1000);
+		return;
+	}
+	CoopNet_Log("test: starting a new game");
+	// what IDoExit in INTERFACE/mainmenu.c does
+	InterfaceStates.BackEnvironmentIsCreated = true;
+	DelEventHandler("backgroundcommand", "ProcCommand");
+	interfaceResultCommand = RC_INTERFACE_DO_NEW_GAME;
+	EndCancelInterface(true);
+}
+
+int iCoopNetClockLogTicks = 0;
+
+// Logs the shared clock every ~5 s while connected.
+void CoopNet_LogClock()
+{
+	iCoopNetClockLogTicks++;
+	if (iCoopNetClockLogTicks < 100) return;
+	iCoopNetClockLogTicks = 0;
+	float fRate = CoopNet_ClockRate();
+	CoopNet_Log("clock " + GetDataYear() + "-" + GetDataMonth() + "-" + GetDataDay() + " " + GetHour() + ":" + GetMinute() + " rate " + fRate);
 }
 
 void CoopNet_StartTick()
@@ -86,6 +141,9 @@ void CoopNet_StartTick()
 
 void CoopNet_Tick()
 {
+	CoopNet_UpdateStatus();
+	CoopNet_Update();
+	CoopNet_LogClock();
 	int iType = CoopNet_Recv();
 	while (iType != 0)
 	{
@@ -98,6 +156,113 @@ void CoopNet_Tick()
 		return;
 	}
 	PostEvent("CoopNet_Tick", COOPNET_TICK_MS);
+}
+
+// loadedLocation is an unset ref in the main menu, so location presence is tracked by events.
+bool bCoopNetInLocation = false;
+
+#event_handler(EVENT_LOCATION_LOAD, "CoopNet_OnLocationLoad");
+#event_handler(EVENT_LOCATION_UNLOAD, "CoopNet_OnLocationUnload");
+
+void CoopNet_OnLocationLoad()
+{
+	bCoopNetInLocation = true;
+}
+
+void CoopNet_OnLocationUnload()
+{
+	bCoopNetInLocation = false;
+}
+
+// Called at the end of NewGame_continue() and OnLoad() in seadogs.c: the host's world (new or
+// loaded) defines the shared time from now on.
+void CoopNet_OnGameStarted()
+{
+	CoopNet_ClockRestart();
+}
+
+// Where this player is and whether it fights: drives the shared clock's pace.
+void CoopNet_UpdateStatus()
+{
+	int iMode = COOPNET_MODE_MENU;
+	bool bBattle = false;
+	if (IsEntity(&worldMap))
+	{
+		iMode = COOPNET_MODE_WORLDMAP;
+	}
+	else
+	{
+		if (bSeaActive)
+		{
+			iMode = COOPNET_MODE_SEA;
+			bBattle = bDisableMapEnter; // enemies close enough to block the map
+		}
+		else
+		{
+			if (bCoopNetInLocation)
+			{
+				iMode = COOPNET_MODE_LAND;
+				bBattle = LAi_group_IsActivePlayerAlarm();
+			}
+		}
+	}
+	if (bAbordageStarted) bBattle = true;
+	CoopNet_SetStatus(iMode, bBattle);
+}
+
+// ---- shared clock hooks ----------------------------------------------------
+// Called from Whr_TimeUpdate (land/sea) and wdmEvent_UpdateDate (world map), which are compiled
+// before this file, hence wrappers instead of #defines at the call sites.
+
+float CoopNet_WeatherTimeHook(float fTime)
+{
+	return CoopNet_TimeHook(fTime, COOPNET_CLOCK_WEATHER);
+}
+
+float CoopNet_WorldMapTimeHook(float fTime)
+{
+	return CoopNet_TimeHook(fTime, COOPNET_CLOCK_WORLDMAP);
+}
+
+// The engine wants to set fTime (hours); replace it with the shared clock and apply the date.
+float CoopNet_TimeHook(float fTime, int iSource)
+{
+	int iState = CoopNet_State();
+	if (iState != COOPNET_CONNECTED && iState != COOPNET_HOSTING) return fTime;
+	if (CoopNet_TickAge() > 1000)
+	{
+		// ClearEvents() (game load, teleport) dropped the posted tick
+		bCoopNetTicking = false;
+		CoopNet_StartTick();
+	}
+
+	float fHours = CoopNet_ClockEngine(GetDataYear(), GetDataMonth(), GetDataDay(), fTime, iSource);
+	int iDaysAhead = CoopNet_ClockDaysAhead();
+	if (iDaysAhead != 0)
+	{
+		int iYear = CoopNet_ClockYear();
+		int iMonth = CoopNet_ClockMonth();
+		int iDay = CoopNet_ClockDay();
+		Environment.date.year = iYear;
+		Environment.date.month = iMonth;
+		Environment.date.day = iDay;
+		worldMap.date.year = iYear;
+		worldMap.date.month = iMonth;
+		worldMap.date.day = iDay;
+		if (iDaysAhead > 0) PostEvent("NextDay", 500); // daily world update, as AddDataToCurrent does
+	}
+
+	int iHour = makeint(fHours);
+	float fMin = (fHours - iHour) * 60.0;
+	int iMin = makeint(fMin);
+	Environment.time = fHours;
+	Environment.date.hour = iHour; // also keeps Whr_TimeUpdate from rolling the day over again
+	Environment.date.min = iMin;
+	Environment.date.sec = makeint((fMin - iMin) * 60.0);
+	worldMap.date.hour = iHour;
+	worldMap.date.min = iMin;
+	Weather.Time.time = fHours;
+	return fHours;
 }
 
 void CoopNet_Dispatch(int iType)

@@ -31,7 +31,6 @@
 #include "ITEMS\itemLogic.c"
 #include "ITEMS\items_utilite.c"
 #include "net\net.c"
-#include "coop\coopnet.c"
 #include "store\store.h"
 #include "interface\interface.c"
 #include "OnLoadReinit.c"
@@ -42,6 +41,7 @@
 //// {*} BUHO-CIC - ADDED CODE - CIC vars and routines.
 #include "BUHO_CIC.c"
 //// {*} BUHO END ADDITION
+#include "coop\coopnet.c"
 
 extern void ShipsInit(); //Boyer add
 extern void InitBaseCannons();
@@ -896,6 +896,7 @@ void OnLoad()
         Sound_OnSeaAlarm555(seaAlarmed, true);
 	
 	iCalculateSaveLoadCount("Load");
+	CoopNet_OnGameStarted(); // coop: the loaded world defines the shared time
 }
 
 void NewGame()
@@ -991,6 +992,7 @@ void NewGame_continue()
     pchar.fix20190909 = true;
 	ReloadProgressUpdate();
 	ReloadProgressEnd();
+	CoopNet_OnGameStarted(); // coop: the new world defines the shared time
 }
 
 void InitGame()

@@ -2,8 +2,8 @@
 #
 # The engine refuses a second instance while a window titled "Pirates of the Maelstrom" exists,
 # so the client runs from Maelstrom_dev2.exe: a local copy with that title changed (never committed).
-# A game window only runs frames while it is active: click a window to let its scripts tick.
-param([int]$Seconds = 60)
+# During a session CoopNet.dll keeps both windows running even when they are not active.
+param([int]$Seconds = 60, [switch]$NewGame, [switch]$Keep)
 
 $game = Split-Path $PSScriptRoot -Parent
 $dev2 = Join-Path $game 'Maelstrom_dev2.exe'
@@ -25,14 +25,19 @@ if (-not (Test-Path $dev2)) {
 Get-Process Maelstrom, Maelstrom_dev2 -ErrorAction SilentlyContinue | Stop-Process -Force
 Remove-Item (Join-Path $game 'coopnet.log'), (Join-Path $game 'error.log') -ErrorAction SilentlyContinue
 
+if ($NewGame) { $env:COOPNET_NEWGAME = '1' } # both instances press "New game" in the main menu
 $env:COOPNET_TEST = 'host'
 $hostProc = Start-Process (Join-Path $game 'Maelstrom.exe') -WorkingDirectory $game -PassThru
 Start-Sleep 8
 $env:COOPNET_TEST = 'client'
 $clientProc = Start-Process $dev2 -WorkingDirectory $game -PassThru
-Remove-Item Env:COOPNET_TEST
+Remove-Item Env:COOPNET_TEST, Env:COOPNET_NEWGAME -ErrorAction SilentlyContinue
 
 Write-Host "host pid $($hostProc.Id), client pid $($clientProc.Id); waiting $Seconds s (switch between the windows)"
 Start-Sleep $Seconds
 Get-Content (Join-Path $game 'coopnet.log')
-if (Test-Path (Join-Path $game 'error.log')) { Write-Host '--- error.log'; Get-Content (Join-Path $game 'error.log') -Encoding Default }
+if (Test-Path (Join-Path $game 'error.log')) {
+    Write-Host '--- error.log (unique lines)'
+    Get-Content (Join-Path $game 'error.log') -Encoding Default | Sort-Object -Unique
+}
+if (-not $Keep) { $hostProc, $clientProc | Stop-Process -Force -ErrorAction SilentlyContinue }

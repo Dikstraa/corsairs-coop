@@ -2,12 +2,15 @@
 //
 // Scripts build an outgoing message with CoopNet_Begin/Put*/Send and read incoming ones with
 // CoopNet_Recv/From/Get*. Field encoding and system message types: see wire.h and session.h.
+#include "coop_clock.h"
 #include "maelstrom_abi.h"
 #include "session.h"
 #include "wire.h"
 
+#include <chrono>
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <mutex>
 #include <string>
 
@@ -16,7 +19,18 @@ using namespace mael;
 namespace
 {
 
-constexpr long kVersion = 2;
+constexpr long kVersion = 3;
+
+// Message types 10..99 are handled inside the DLL and never reach scripts.
+enum : uint16_t
+{
+    kMsgClock = 10,      // host -> all:  f64 gameSeconds, f64 rate, u32 epoch
+    kMsgPlayerTime = 11, // client -> host: i32 mode, u8 battle, f64 rate
+    kFirstInternal = 10,
+    kLastInternal = 99,
+};
+constexpr double kClockBroadcastEvery = 0.25;
+constexpr double kPlayerTimeEvery = 0.5;
 
 VAPI *g_api = nullptr;
 std::string g_lastError;
@@ -25,6 +39,22 @@ coopnet::Writer g_out;   // message being built by CoopNet_Begin/Put*
 coopnet::Message g_in;   // message returned by the last CoopNet_Recv
 coopnet::Reader g_inRd;  // read position inside g_in
 std::string g_retString; // keeps returned strings alive after the native returns
+
+coopnet::Clock g_clock;
+coopnet::RateMeter g_meter;
+coopnet::PlayerTime g_local;   // this player's mode/battle (from the script tick) and pace
+coopnet::GameDate g_applied;   // date returned by the last CoopNet_ClockEngine
+int g_appliedDaysAhead = 0;    // whole days g_applied is ahead of the engine's date
+uint32_t g_hostEpoch = 0;      // host: clock restarts so far
+double g_lastUpdate = -1;      // real time of the last CoopNet_Update
+double g_lastClockSend = -1;
+double g_lastPlayerTimeSend = -1;
+
+double RealNow()
+{
+    using namespace std::chrono;
+    return duration<double>(steady_clock::now().time_since_epoch()).count();
+}
 
 // Created on first use and intentionally never destroyed: joining the network thread from a
 // static destructor would run under the loader lock.
@@ -167,6 +197,217 @@ DWORD __cdecl N_SetLoss(VS_STACK *s)
     return Return(s, 1L);
 }
 
+// ---- running in the background -----------------------------------------------
+// The engine stops running frames when its window is deactivated; it only learns that from
+// WM_ACTIVATE/WM_ACTIVATEAPP. During a co-op session the world must keep going for the others,
+// so those notifications are hidden from it.
+
+WNDPROC g_origWndProc = nullptr;
+
+LRESULT CALLBACK CoopWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (Net().GetState() != coopnet::State::Offline)
+    {
+        if (msg == WM_ACTIVATEAPP && wp == FALSE)
+            return 0;
+        if (msg == WM_ACTIVATE && LOWORD(wp) == WA_INACTIVE)
+            return 0;
+    }
+    return CallWindowProcA(g_origWndProc, hwnd, msg, wp, lp);
+}
+
+BOOL CALLBACK FindGameWindow(HWND hwnd, LPARAM out)
+{
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    char title[64] = {};
+    GetWindowTextA(hwnd, title, sizeof title);
+    if (pid == GetCurrentProcessId() && strncmp(title, "Pirates of the Maelstro", 23) == 0)
+    {
+        *reinterpret_cast<HWND *>(out) = hwnd;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+void KeepRunningInBackground()
+{
+    if (g_origWndProc)
+        return;
+    HWND hwnd = nullptr;
+    EnumWindows(FindGameWindow, reinterpret_cast<LPARAM>(&hwnd));
+    if (!hwnd)
+        return;
+    g_origWndProc = reinterpret_cast<WNDPROC>(
+        SetWindowLongPtrA(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(CoopWndProc)));
+    Log("window: keeps running in the background during co-op");
+}
+
+// ---- shared clock --------------------------------------------------------------
+
+void SendClock()
+{
+    double gameSeconds = g_clock.Now(RealNow());
+    double rate = g_clock.Rate();
+    coopnet::Writer w;
+    w.U16(kMsgClock);
+    w.Raw(&gameSeconds, sizeof gameSeconds);
+    w.Raw(&rate, sizeof rate);
+    w.U32(g_clock.Epoch());
+    Net().Send(coopnet::kBroadcast, w.Data(), false);
+}
+
+void SendPlayerTime()
+{
+    coopnet::Writer w;
+    w.U16(kMsgPlayerTime);
+    w.U32(static_cast<uint32_t>(g_local.mode));
+    w.U8(g_local.battle ? 1 : 0);
+    w.Raw(&g_local.rate, sizeof g_local.rate);
+    Net().Send(coopnet::kHostId, w.Data(), false);
+}
+
+void HandleInternal(int from, uint16_t type, coopnet::Reader &r)
+{
+    if (type == kMsgClock && Net().GetState() == coopnet::State::Connected)
+    {
+        double gameSeconds, rate;
+        uint32_t epoch;
+        if (r.Raw(&gameSeconds, sizeof gameSeconds) && r.Raw(&rate, sizeof rate) && r.U32(epoch))
+        {
+            if (!g_clock.Valid())
+                Log("clock: following the host");
+            g_clock.OnHostClock(gameSeconds, rate, epoch, RealNow());
+        }
+    }
+    else if (type == kMsgPlayerTime && g_clock.IsHost())
+    {
+        uint32_t mode;
+        uint8_t battle;
+        coopnet::PlayerTime t;
+        if (r.U32(mode) && r.U8(battle) && r.Raw(&t.rate, sizeof t.rate))
+        {
+            t.mode = static_cast<coopnet::Mode>(mode);
+            t.battle = battle != 0;
+            g_clock.SetPlayer(from, t);
+        }
+    }
+}
+
+// int CoopNet_Update()  once per script tick, before the CoopNet_Recv loop
+DWORD __cdecl N_Update(VS_STACK *s)
+{
+    double now = RealNow();
+    g_lastUpdate = now;
+    g_local.rate = g_meter.Rate();
+    if (Net().GetState() != coopnet::State::Offline)
+        KeepRunningInBackground();
+    switch (Net().GetState())
+    {
+    case coopnet::State::Hosting:
+        if (g_clock.Valid())
+        {
+            g_clock.SetPlayer(coopnet::kHostId, g_local);
+            g_clock.AdvanceHost(now);
+            if (now - g_lastClockSend >= kClockBroadcastEvery)
+            {
+                g_lastClockSend = now;
+                SendClock();
+            }
+        }
+        break;
+    case coopnet::State::Connected:
+        if (now - g_lastPlayerTimeSend >= kPlayerTimeEvery)
+        {
+            g_lastPlayerTimeSend = now;
+            SendPlayerTime();
+        }
+        break;
+    default:
+        if (g_clock.Valid())
+        {
+            g_clock.Reset();
+            Log("clock: stopped");
+        }
+        break;
+    }
+    return Return(s, 1L);
+}
+
+// int CoopNet_TickAge()  ms since the last CoopNet_Update (detects a tick lost to ClearEvents)
+DWORD __cdecl N_TickAge(VS_STACK *s)
+{
+    double age = g_lastUpdate < 0 ? 1e6 : (RealNow() - g_lastUpdate) * 1000.0;
+    return Return(s, static_cast<long>(age > 1e6 ? 1e6 : age));
+}
+
+// int CoopNet_SetStatus(int mode, int battle)  mode: 0 menu, 1 world map, 2 sea, 3 land
+DWORD __cdecl N_SetStatus(VS_STACK *s)
+{
+    bool battle = GetLong(Pop(s)) != 0;
+    auto mode = static_cast<coopnet::Mode>(GetLong(Pop(s)));
+    if (mode != g_local.mode)
+        g_meter.Reset(); // a new mode has its own pace
+    if (mode != g_local.mode || battle != g_local.battle)
+        Log("status: mode %d%s", static_cast<int>(mode), battle ? ", battle" : "");
+    g_local.mode = mode;
+    g_local.battle = battle;
+    return Return(s, 1L);
+}
+
+// float CoopNet_ClockEngine(int year, int month, int day, float hours, int source)
+// The engine proposes a time; returns the hours to apply. The date to apply is then read with
+// CoopNet_ClockYear/Month/Day, and CoopNet_ClockDaysAhead tells how many days it moved forward.
+DWORD __cdecl N_ClockEngine(VS_STACK *s)
+{
+    long source = GetLong(Pop(s));
+    float hours = GetFloat(Pop(s));
+    long day = GetLong(Pop(s));
+    long month = GetLong(Pop(s));
+    long year = GetLong(Pop(s));
+    double now = RealNow();
+    coopnet::GameDate engine{static_cast<int>(year), static_cast<int>(month), static_cast<int>(day), hours};
+
+    g_meter.Sample(source, hours, now);
+    auto state = Net().GetState();
+    // The host's world defines the time: start from it once the host is actually in a game.
+    if (state == coopnet::State::Hosting && !g_clock.Valid() && g_local.mode != coopnet::Mode::Menu)
+    {
+        g_clock.StartHost(engine, now, ++g_hostEpoch);
+        Log("clock: hosting from %04d-%02d-%02d %.2f h, epoch %u", engine.year, engine.month, engine.day,
+            engine.hours, g_hostEpoch);
+    }
+
+    g_applied = engine;
+    if (g_clock.Valid() && (state == coopnet::State::Hosting || state == coopnet::State::Connected))
+        g_applied = coopnet::FromSeconds(g_clock.Now(now));
+    g_meter.Applied(g_applied.hours);
+
+    coopnet::GameDate a = g_applied, e = engine;
+    a.hours = e.hours = 0;
+    g_appliedDaysAhead = static_cast<int>((coopnet::ToSeconds(a) - coopnet::ToSeconds(e)) / 86400.0);
+    return Return(s, static_cast<float>(g_applied.hours));
+}
+
+// int CoopNet_ClockRestart()  host: a new game or a loaded save defines the time from now on
+DWORD __cdecl N_ClockRestart(VS_STACK *s)
+{
+    if (g_clock.IsHost())
+    {
+        g_clock.Reset();
+        Log("clock: restart, waiting for the host's game time");
+    }
+    return Return(s, 1L);
+}
+
+DWORD __cdecl N_ClockYear(VS_STACK *s) { return Return(s, static_cast<long>(g_applied.year)); }
+DWORD __cdecl N_ClockMonth(VS_STACK *s) { return Return(s, static_cast<long>(g_applied.month)); }
+DWORD __cdecl N_ClockDay(VS_STACK *s) { return Return(s, static_cast<long>(g_applied.day)); }
+DWORD __cdecl N_ClockDaysAhead(VS_STACK *s) { return Return(s, static_cast<long>(g_appliedDaysAhead)); }
+
+// float CoopNet_ClockRate()  shared pace, game seconds per real second (0 = stopped)
+DWORD __cdecl N_ClockRate(VS_STACK *s) { return Return(s, static_cast<float>(g_clock.Rate())); }
+
 // ---- outgoing messages -------------------------------------------------------
 
 // int CoopNet_Begin(int type)  type >= 100
@@ -217,18 +458,24 @@ DWORD __cdecl N_Send(VS_STACK *s)
 // int CoopNet_Recv()  type of the next message, 0 if none
 DWORD __cdecl N_Recv(VS_STACK *s)
 {
-    uint16_t type = 0;
-    if (Net().Poll(g_in))
+    while (Net().Poll(g_in))
     {
         g_inRd = coopnet::Reader(g_in.payload);
-        g_inRd.U16(type);
+        uint16_t type = 0;
+        if (!g_inRd.U16(type))
+            continue;
+        if (type >= kFirstInternal && type <= kLastInternal)
+        {
+            HandleInternal(g_in.from, type, g_inRd);
+            continue;
+        }
+        if (type == coopnet::kEvtPeerLeft)
+            g_clock.RemovePlayer(g_in.from);
+        return Return(s, static_cast<long>(type));
     }
-    else
-    {
-        g_in = coopnet::Message{};
-        g_inRd = coopnet::Reader();
-    }
-    return Return(s, static_cast<long>(type));
+    g_in = coopnet::Message{};
+    g_inRd = coopnet::Reader();
+    return Return(s, 0L);
 }
 
 // int CoopNet_From()  sender of the last received message
@@ -315,6 +562,16 @@ const Native kNatives[] = {
     {"CoopNet_Version", "int", 0, N_Version},
     {"CoopNet_Log", "int", 1, N_Log},
     {"CoopNet_GetEnv", "string", 1, N_GetEnv},
+    {"CoopNet_Update", "int", 0, N_Update},
+    {"CoopNet_TickAge", "int", 0, N_TickAge},
+    {"CoopNet_SetStatus", "int", 2, N_SetStatus},
+    {"CoopNet_ClockEngine", "float", 5, N_ClockEngine},
+    {"CoopNet_ClockYear", "int", 0, N_ClockYear},
+    {"CoopNet_ClockMonth", "int", 0, N_ClockMonth},
+    {"CoopNet_ClockDay", "int", 0, N_ClockDay},
+    {"CoopNet_ClockDaysAhead", "int", 0, N_ClockDaysAhead},
+    {"CoopNet_ClockRate", "float", 0, N_ClockRate},
+    {"CoopNet_ClockRestart", "int", 0, N_ClockRestart},
 };
 
 class COOPNET : public SCRIPT_LIBRIARY

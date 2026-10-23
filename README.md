@@ -34,14 +34,37 @@ int type = CoopNet_Recv();           // 0 = nothing; read fields in the order th
 CoopNet_From();  CoopNet_GetInt();  CoopNet_GetFloat();  CoopNet_GetString();
 ```
 
-Types 1–5 are connection events (`COOPNET_EVT_*`), own messages use types from 100.
-Clients talk only to the host; the host relays.
+Types 1–5 are connection events (`COOPNET_EVT_*`), own messages use types from 100;
+10–99 are handled inside the DLL. Clients talk only to the host; the host relays.
+
+## Shared time
+
+One clock for everybody, owned by the host (`coop_clock.h`):
+
+- it starts from the host's world time after a new game or a loaded save;
+- it stops while any player is in a battle (sea battle near enemies, boarding, land alarm);
+- otherwise it runs at the pace of the slowest player that needs time to pass. Each player's
+  pace is measured from how fast its own engine moves time (world map, weather on land/sea,
+  time acceleration), so acceleration only works when everybody accelerates;
+  menus and dialogs don't hold the others back.
+
+Hooks: `Whr_TimeUpdate` (WhrWeather.c) and `wdmEvent_UpdateDate` (worldmap_events.c) pass the
+engine's proposed time through `CoopNet_TimeHook`, which applies the shared date and time.
+During a session the DLL also keeps the game running when its window is not active.
+
+Test without clicking through menus: `run_pair.ps1 -NewGame` starts both instances into a new game.
 
 ## Engine and script quirks
 
 - A second `Maelstrom.exe` exits at once while a window titled "Pirates of the Maelstrom" exists.
   `run_pair.ps1` makes a local `Maelstrom_dev2.exe` with that title changed.
-- A game window runs frames (and script events) only while it is active.
+- A game window runs frames (and script events) only while it is active; the engine learns that
+  from WM_ACTIVATE/WM_ACTIVATEAPP only, which CoopNet.dll hides during a session.
+- `loadedLocation` is an unset ref in the main menu (`IsEntity(loadedLocation)` is a runtime error
+  there), and `bLandInterfaceStart` stays false in the hero selection cabin: location presence is
+  tracked with `EVENT_LOCATION_LOAD/UNLOAD` handlers.
+- Files compiled before `coop/coopnet.c` can call its functions but can't use its `#define`s.
+- The weather reports time only every few game minutes, so the clock is applied in steps.
 - Script identifiers are case-insensitive: `#define COOPNET_HOST` clashes with `CoopNet_Host()`.
 - `default:` labels are global: `seadogs.c` already has one, a second one fails to compile.
 - `ClearEvents()` (game load, teleport) drops posted events; the CoopNet tick must be restarted after it.

@@ -685,6 +685,7 @@ int Whr_BlendColor(float fBlend, int col1, int col2)
 void Whr_TimeUpdate()
 {
 	float fTime = GetEventData();
+	fTime = CoopNet_WeatherTimeHook(fTime); // coop: shared clock
 	//float fBlend = fTime - makeint(fTime);
 
 	//

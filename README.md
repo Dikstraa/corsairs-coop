@@ -71,6 +71,25 @@ between nations. Personal: the Caiman colony, its warehouse and the ship-to-ship
 `run_pair.ps1 -NewGame -TestWorld`: the host changes a store and a colony owner, the client another
 store; both log what they see.
 
+## Shared ships on the world map
+
+`Program/coop/coop_encounters.c`: the random ships of the world map (merchants, patrols, pirates,
+warring ships, floating barrels) are the same for everybody. Quest encounters and storms stay personal.
+
+- The game creates them around the player's own ship, so each player still generates the ones
+  around itself (their owner), but registers every one with the host, which keeps the one list
+  and passes it to everybody (a joining client gets it with the host's world).
+- On the map the others' entries are shown as mirrors: encounters created at the owner's
+  position (a little ahead, they start from a standstill), sailing to the same goal at the same
+  speed, carrying the owner's encounter data, so attacking a mirror gives the same kind of
+  squadron. The owner reports positions every 2 s while on the map; a mirror more than 30 map
+  units off, or with a changed goal, is re-created (in tests every 10–20 s). While the owner is
+  off the map its ships stand still for it, and so do the mirrors.
+- A ship that disappears for anybody (taken into a battle, arrived, expired) is deleted for
+  everybody. The generation limit counts mirrors too, so players sailing together don't double
+  the traffic.
+- A new world on the host (new game, load) makes everybody forget the list.
+
 ## Script API
 
 ```c

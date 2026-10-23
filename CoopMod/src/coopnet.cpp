@@ -23,7 +23,7 @@ using namespace mael;
 namespace
 {
 
-constexpr long kVersion = 3;
+constexpr long kVersion = 4;
 
 // Message types 10..99 are handled inside the DLL and never reach scripts.
 enum : uint16_t
@@ -454,6 +454,13 @@ DWORD __cdecl N_TickAge(VS_STACK *s)
 {
     double age = g_lastUpdate < 0 ? 1e6 : (RealNow() - g_lastUpdate) * 1000.0;
     return Return(s, static_cast<long>(age > 1e6 ? 1e6 : age));
+}
+
+// float CoopNet_Seconds()  real seconds since the game started (for timing in scripts)
+DWORD __cdecl N_Seconds(VS_STACK *s)
+{
+    static const double start = RealNow();
+    return Return(s, static_cast<float>(RealNow() - start));
 }
 
 // int CoopNet_SetStatus(int mode, int battle)  mode: 0 menu, 1 world map, 2 sea, 3 land
@@ -928,6 +935,7 @@ const Native kNatives[] = {
     {"CoopNet_UseUdp", "int", 0, N_UseUdp},
     {"CoopNet_Config", "string", 1, N_Config},
     {"CoopNet_SetLocalRate", "int", 1, N_SetLocalRate},
+    {"CoopNet_Seconds", "float", 0, N_Seconds},
 };
 
 class COOPNET : public SCRIPT_LIBRIARY

@@ -82,6 +82,7 @@ native int CoopNet_UseSteam();
 native int CoopNet_UseUdp();
 native string CoopNet_Config(string key);
 native int CoopNet_SetLocalRate(float gameSecondsPerSecond);
+native float CoopNet_Seconds();
 
 #library "COOPNET"
 
@@ -217,6 +218,22 @@ void CoopNet_TestMap()
 		Land_MapLoad();
 		return;
 	}
+	if (iCoopNetTestMapTicks == 700 && IsEntity(&worldMap) && CoopNet_State() == COOPNET_CONNECTED)
+	{
+		// what going into a battle does to the ships it takes along
+		aref arEncs;
+		makearef(arEncs, worldMap.encounters);
+		int iNum = GetAttributesNum(arEncs);
+		for (int i = 0; i < iNum; i++)
+		{
+			aref arEnc = GetAttributeN(arEncs, i);
+			if (!CheckAttribute(arEnc, "coopMirror")) continue;
+			CoopNet_Log("test: client takes " + GetAttributeName(arEnc) + " (" + arEnc.coopGid + ") into a battle");
+			arEnc.needDelete = "Reload delete non quest encounter";
+			worldMap.deleteUpdate = "";
+			break;
+		}
+	}
 	if (!IsEntity(&worldMap) || CoopNet_State() != COOPNET_HOSTING) return;
 	if (iCoopNetTestMapTicks - (iCoopNetTestMapTicks / 100) * 100 != 0 || iCoopNetTestMapTicks > 1000) return;
 	float fX = stf(worldMap.playerShipX) + 40.0;
@@ -298,6 +315,7 @@ void CoopNet_Tick()
 	CoopNet_Update();
 	CoopNet_PresenceTick();
 	CoopNet_WorldTick();
+	CoopNet_EncTick();
 	CoopNet_LogClock();
 	CoopNet_TestNewGame();
 	CoopNet_TestSkip();
@@ -498,6 +516,7 @@ void CoopNet_Dispatch(int iType)
 		return;
 	}
 	if (CoopNet_WorldDispatch(iType, iFrom)) return;
+	if (CoopNet_EncDispatch(iType, iFrom)) return;
 
 	if (iType > COOPNET_MSG_TEST_ECHO)
 	{
@@ -596,3 +615,4 @@ void CoopNet_Dispatch(int iType)
 
 #include "coop\coop_presence.c"
 #include "coop\coop_world.c"
+#include "coop\coop_encounters.c"

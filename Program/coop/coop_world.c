@@ -31,6 +31,7 @@ void CoopNet_WorldGameStarted()
 	bCoopNetWorldSynced = false;
 	DeleteAttribute(&CoopNetWorld, "");
 	iCoopNetWorldScan = 0;
+	CoopNet_EncWorldStarted();
 	// host: every key differs from the empty snapshots, so the new world goes out to everybody
 	if (CoopNet_State() == COOPNET_CONNECTED) CoopNet_WorldRequest();
 }
@@ -40,7 +41,9 @@ void CoopNet_WorldConnected()
 {
 	bCoopNetWorldSynced = false;
 	DeleteAttribute(&CoopNetWorld, "");
-	if (bCoopNetWorldInGame) CoopNet_WorldRequest();
+	if (!bCoopNetWorldInGame) return;
+	CoopNet_EncReset();
+	CoopNet_WorldRequest();
 }
 
 void CoopNet_WorldRequest()
@@ -160,6 +163,7 @@ void CoopNet_WorldSendAll(int iTo)
 		iSent++;
 	}
 	CoopNet_WorldSendRelations(iTo);
+	CoopNet_EncSendAll(iTo);
 	CoopNet_Begin(COOPNET_MSG_WORLD_DONE);
 	CoopNet_Send(iTo, COOPNET_RELIABLE);
 	CoopNet_Log("world: sent " + iSent + " entries to player " + iTo);

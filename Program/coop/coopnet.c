@@ -720,8 +720,8 @@ void CoopNet_UpdateStatus()
 		{
 			if (bCoopNetInLocation)
 			{
+				// a fight on land doesn't stop the shared clock: the others play on
 				iMode = COOPNET_MODE_LAND;
-				bBattle = LAi_group_IsActivePlayerAlarm();
 			}
 		}
 	}

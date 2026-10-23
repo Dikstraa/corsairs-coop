@@ -232,8 +232,22 @@ player's heading when it stands, and draws its blade with the player. A puppet i
 (`location = "none"`) when its player leaves or this player's location unloads, so the game never
 logs it in again when it loads that location.
 
-`run_pair.ps1 -NewGame -TestLand`: both go to Bridgetown; the client runs 10 m and back, then draws
-its blade (measured: a running puppet up to 3 m behind, a standing one 0.2 m).
+People: the stock characters (index below `GlobalCharacters`: merchants, governors, ...) are the
+same in every game and stay local. Everybody else in a location (citizens, soldiers, bandits,
+monsters, quest people) was made by the game that loaded it, so the player who has been there
+longest owns the location (each report says how long; the lower id wins a tie). The owner sends
+its people (`LAi_loginedcharacters`) twice a second, 12 per message; the others see them as
+puppets `CoopLand_<owner>_<idx>` that walk, draw blades and die with them (`LAi_KillCharacter`, a
+scripted death: nobody gets the kill). A player who is not the owner hides its own made-up people
+(`location = "none"`, the old address kept in `coopLandHidden`) and gets them back when the owner
+leaves or when it leaves itself. Officers are never hidden: every player sends its own. Puppets
+are immortal for now: fights with them are not shared yet.
+
+`run_pair.ps1 -NewGame -TestLand`: both go to Bridgetown, the client 15 s after the host, so the
+host owns the town; the client runs 10 m and back, then draws its blade; after 50 s the host goes
+to the tavern. Measured: a running player puppet up to 3 m behind, a standing one 0.2 m; the
+client hid 33-40 of its townsfolk and showed the host's 35-36, walking up to ~5 m behind (under
+the 6 m jump); its own came back half a second after the host left.
 
 ## Script API
 
@@ -256,7 +270,8 @@ Types 1–5 are connection events (`COOPNET_EVT_*`), own messages use types from
 One clock for everybody, owned by the host (`coop_clock.h`):
 
 - it starts from the host's world time after a new game or a loaded save;
-- it stops while any player is in a battle (sea battle near enemies, boarding, land alarm);
+- it stops while any player is in a battle (sea battle near enemies, boarding; a fight on land
+  doesn't stop it, the others play on);
 - otherwise it runs at the pace of the slowest player that needs time to pass. Each player's
   pace is measured from how fast its own engine moves time (world map, weather on land/sea,
   time acceleration), so acceleration only works when everybody accelerates;

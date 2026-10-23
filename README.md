@@ -15,10 +15,15 @@ come from an installed copy of the Ship Pack: clone this repo over the game fold
 
 ## Requirements
 
-- DirectX 9 runtime: `d3dx9_43.dll` (x64) from the Microsoft DirectX End-User Runtime (June 2010).
-  Without it `Animation.dll`, `Sea.dll`, `Weather.dll` and `renderer/dx9.dll` fail with error 126
-  and the game exits with "No service: RENDER". Either install the runtime or put the x64
-  `d3dx9_43.dll` next to `Maelstrom.exe`.
+- DirectX 9 runtime from the Microsoft DirectX End-User Runtime (June 2010), x64:
+  - `d3dx9_43.dll` — without it `Animation.dll`, `Sea.dll`, `Weather.dll` and `renderer/dx9.dll`
+    fail with error 126 and the game exits with "No service: RENDER".
+  - `D3DCompiler_43.dll` — loaded dynamically by d3dx9 to compile shaders. Without it `dx9.dll`
+    crashes on a null pointer while compiling techniques and the game silently closes right after
+    "Starting DirectX 9".
+
+  Either install the full runtime (`directx_Jun2010_redist.exe` → `DXSETUP.exe`) or extract both
+  x64 DLLs from its `Jun2010_d3dx9_43_x64.cab` / `Jun2010_D3DCompiler_43_x64.cab` next to `Maelstrom.exe`.
 
 ## Encoding
 

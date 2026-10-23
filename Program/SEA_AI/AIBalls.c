@@ -118,6 +118,7 @@ void Ball_AddBall(aref aCharacter, float fX, float fY, float fZ, float fSpeedV0,
 
 	EntityUpdate(1);
 	AIBalls.Add = "";
+	CoopNet_SeaBallFired(aCharacter); // co-op: the others see this ball fly from this ship
 
 	string sParticleName = "cancloud_fire";		// if (sti(aCharacter.ship.type) < SHIP_CORVETTE)
 

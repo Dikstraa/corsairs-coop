@@ -19,6 +19,7 @@
 										// ship: int idx, int baseType, int nation, string name, int flags, float x, z, ay, speed, hp
 #define COOPNET_MSG_SEA_HIT		132		// int owner, int ship, float damage, int cannon, int killStatus, int attacker, int attackerShip
 #define COOPNET_MSG_SEA_SINK	133		// int owner, int ship, int killStatus, int killer, int killerShip (-1: nobody)
+#define COOPNET_MSG_SEA_SHOTS	134		// int owner, int n, n x (int ship, float x, y, z, dir, speed, angle, int cannonType, string charge, float height, size, time, maxDistance)
 #define COOPNET_SEA_FLEET		1		// ship flags: a companion in the player's own fleet
 #define COOPNET_SEA_FLAGSHIP	2		// the player's own ship (flags 0: an NPC ship)
 #define COOPNET_SEA_TICKS		5		// report every 5 ticks = 0.25 s
@@ -54,6 +55,12 @@ void CoopNet_SeaTick()
 		return;
 	}
 
+	if (bSeaActive) CoopNet_SeaSendShots();
+	else
+	{
+		DeleteAttribute(&CoopNetSeaShots, "");
+		iCoopNetSeaShots = 0;
+	}
 	iCoopNetSeaTicks++;
 	if (iCoopNetSeaTicks >= COOPNET_SEA_TICKS)
 	{
@@ -354,6 +361,7 @@ void CoopNet_SeaCreatePuppet(aref arP, aref arS)
 	arS.chr = iChr;
 	arS.inSea = true;
 	arS.parked = false;
+	arS.sunk = false;
 	arS.rel = -1;
 	CoopNet_SeaSides(arS);
 	CoopNet_Log("sea: ship " + arS.idx + " of player " + arP.id + " (" + arS.name + ", type " + iType + ", nation " + arS.nation + ") as " + sId + " at " + arS.lx + " " + arS.lz);
@@ -601,7 +609,8 @@ void CoopNet_OnSeaSink(int iFrom)
 	if (!CheckAttribute(&CoopNetSea, sPath)) return;
 	aref arS;
 	makearef(arS, CoopNetSea.(sPath));
-	if (!sti(arS.inSea) || sti(arS.sunk)) return;
+	if (!sti(arS.inSea)) return;
+	if (CheckAttribute(arS, "sunk") && sti(arS.sunk)) return;
 	arS.sunk = true;
 	int iChr = sti(arS.chr);
 	ref rChr = &Characters[iChr];
@@ -619,6 +628,185 @@ void CoopNet_OnSeaSink(int iFrom)
 	DeleteAttribute(rChr, "coopSpeed");
 	rChr.Ship.HP = 0.0;
 	ShipDead(iChr, iStatus, iKillerHere);
+}
+// ---- cannon balls -----------------------------------------------------------------------------
+// Every ball a ship of this machine fires (Ball_AddBall, after the shooter's dispersion) is queued
+// and sent once per tick. Elsewhere the same ball flies from the puppet (shifted by the puppet's
+// offset from where the real ship is), with smoke and sound; it is only for show, the real hits
+// come from the shooter's machine.
+
+object CoopNetSeaShots;	// b<n>: ship, x, y, z, dir, speed, angle, cannonType, charge, height, size, time, maxDistance
+int iCoopNetSeaShots = 0;
+
+void CoopNet_SeaBallFired(aref aCharacter)
+{
+	int iState = CoopNet_State();
+	if (iState != COOPNET_CONNECTED && iState != COOPNET_HOSTING) return;
+	if (CheckAttribute(aCharacter, "coopPuppet") || !bSeaActive) return;
+	string sB = "b" + iCoopNetSeaShots;
+	iCoopNetSeaShots++;
+	float fX = stf(AIBalls.x);
+	float fZ = stf(AIBalls.z);
+	if (pchar.location == "")
+	{
+		float fScale = CoopNet_SeaScale();
+		fX = fX / fScale + stf(worldMap.zeroX);
+		fZ = fZ / fScale + stf(worldMap.zeroZ);
+	}
+	CoopNetSeaShots.(sB).ship = aCharacter.index;
+	CoopNetSeaShots.(sB).x = fX;
+	CoopNetSeaShots.(sB).y = AIBalls.y;
+	CoopNetSeaShots.(sB).z = fZ;
+	CoopNetSeaShots.(sB).dir = AIBalls.Dir;
+	CoopNetSeaShots.(sB).speed = AIBalls.SpdV0;
+	CoopNetSeaShots.(sB).angle = AIBalls.Ang;
+	CoopNetSeaShots.(sB).cannonType = AIBalls.CannonType;
+	CoopNetSeaShots.(sB).charge = AIBalls.Type;
+	CoopNetSeaShots.(sB).height = AIBalls.HeightMultiply;
+	CoopNetSeaShots.(sB).size = AIBalls.SizeMultiply;
+	CoopNetSeaShots.(sB).time = AIBalls.TimeSpeedMultiply;
+	CoopNetSeaShots.(sB).maxDistance = AIBalls.MaxFireDistance;
+}
+
+// Every tick: the balls fired since the last one, in one message.
+void CoopNet_SeaSendShots()
+{
+	if (iCoopNetSeaShots == 0) return;
+	aref arShots;
+	makearef(arShots, CoopNetSeaShots);
+	int iNum = GetAttributesNum(arShots);
+	CoopNet_Begin(COOPNET_MSG_SEA_SHOTS);
+	CoopNet_PutInt(CoopNet_MyId());
+	CoopNet_PutInt(iNum);
+	for (int i = 0; i < iNum; i++)
+	{
+		aref arB = GetAttributeN(arShots, i);
+		CoopNet_PutInt(sti(arB.ship));
+		CoopNet_PutFloat(stf(arB.x));
+		CoopNet_PutFloat(stf(arB.y));
+		CoopNet_PutFloat(stf(arB.z));
+		CoopNet_PutFloat(stf(arB.dir));
+		CoopNet_PutFloat(stf(arB.speed));
+		CoopNet_PutFloat(stf(arB.angle));
+		CoopNet_PutInt(sti(arB.cannonType));
+		CoopNet_PutString(arB.charge);
+		CoopNet_PutFloat(stf(arB.height));
+		CoopNet_PutFloat(stf(arB.size));
+		CoopNet_PutFloat(stf(arB.time));
+		CoopNet_PutFloat(stf(arB.maxDistance));
+	}
+	if (CoopNet_State() == COOPNET_HOSTING) CoopNet_Send(COOPNET_ALL, COOPNET_RELIABLE);
+	else CoopNet_Send(COOPNET_HOST_ID, COOPNET_RELIABLE);
+	DeleteAttribute(&CoopNetSeaShots, "");
+	iCoopNetSeaShots = 0;
+}
+
+void CoopNet_OnSeaShots(int iFrom)
+{
+	int iOwner = CoopNet_GetInt();
+	int iNum = CoopNet_GetInt();
+	bool bRelay = false;
+	if (CoopNet_State() == COOPNET_HOSTING && iOwner == iFrom)
+	{
+		bRelay = true;
+		CoopNet_Begin(COOPNET_MSG_SEA_SHOTS);
+		CoopNet_PutInt(iOwner);
+		CoopNet_PutInt(iNum);
+	}
+	string sKey = "p" + iOwner;
+	bool bHere = false;
+	if (bSeaActive && iOwner != CoopNet_MyId() && CheckAttribute(&CoopNetSea, sKey + ".ships"))
+	{
+		if (CoopNetSea.(sKey).island == pchar.location) bHere = true;
+	}
+	int iShown = 0;
+	for (int i = 0; i < iNum; i++)
+	{
+		int iShip = CoopNet_GetInt();
+		float fX = CoopNet_GetFloat();
+		float fY = CoopNet_GetFloat();
+		float fZ = CoopNet_GetFloat();
+		float fDir = CoopNet_GetFloat();
+		float fSpeed = CoopNet_GetFloat();
+		float fAngle = CoopNet_GetFloat();
+		int iCannonType = CoopNet_GetInt();
+		string sCharge = CoopNet_GetString();
+		float fHeight = CoopNet_GetFloat();
+		float fSize = CoopNet_GetFloat();
+		float fTime = CoopNet_GetFloat();
+		float fMaxDistance = CoopNet_GetFloat();
+		if (bRelay)
+		{
+			CoopNet_PutInt(iShip);
+			CoopNet_PutFloat(fX);
+			CoopNet_PutFloat(fY);
+			CoopNet_PutFloat(fZ);
+			CoopNet_PutFloat(fDir);
+			CoopNet_PutFloat(fSpeed);
+			CoopNet_PutFloat(fAngle);
+			CoopNet_PutInt(iCannonType);
+			CoopNet_PutString(sCharge);
+			CoopNet_PutFloat(fHeight);
+			CoopNet_PutFloat(fSize);
+			CoopNet_PutFloat(fTime);
+			CoopNet_PutFloat(fMaxDistance);
+		}
+		if (!bHere) continue;
+		string sS = "s" + iShip;
+		if (!CheckAttribute(&CoopNetSea, sKey + ".ships." + sS + ".chr")) continue;
+		aref arS;
+		makearef(arS, CoopNetSea.(sKey).ships.(sS));
+		if (!sti(arS.inSea)) continue;
+		if (CheckAttribute(arS, "sunk") && sti(arS.sunk)) continue;
+		int iChr = sti(arS.chr);
+		if (!CheckAttribute(&Characters[iChr], "Ship.Pos.x")) continue;
+		if (pchar.location == "")
+		{
+			float fScale = CoopNet_SeaScale();
+			fX = (fX - stf(worldMap.zeroX)) * fScale;
+			fZ = (fZ - stf(worldMap.zeroZ)) * fScale;
+		}
+		// from the puppet: shifted by its offset from the real ship's last reported position
+		float fAge = CoopNet_Seconds() - stf(CoopNetSea.(sKey).at);
+		float fAY = stf(arS.ay);
+		float fShipX = stf(arS.lx) + sin(fAY) * stf(arS.speed) * fAge;
+		float fShipZ = stf(arS.lz) + cos(fAY) * stf(arS.speed) * fAge;
+		fX = fX + stf(Characters[iChr].Ship.Pos.x) - fShipX;
+		fZ = fZ + stf(Characters[iChr].Ship.Pos.z) - fShipZ;
+		CoopNet_SeaAddBall(iChr, fX, fY, fZ, fDir, fSpeed, fAngle, iCannonType, sCharge, fHeight, fSize, fTime, fMaxDistance);
+		iShown++;
+	}
+	if (bRelay) CoopNet_Send(COOPNET_ALL, COOPNET_RELIABLE);
+	if (iShown > 0) CoopNet_Log("sea: " + iShown + " balls of player " + iOwner + " shown");
+}
+
+// Ball_AddBall without the shooter's dispersion (already in the ball) and the cannon damage check.
+void CoopNet_SeaAddBall(int iChr, float fX, float fY, float fZ, float fDir, float fSpeed, float fAngle, int iCannonType, string sCharge, float fHeight, float fSize, float fTime, float fMaxDistance)
+{
+	EntityUpdate(0);
+	AIBalls.CannonType = iCannonType;
+	AIBalls.x = fX;
+	AIBalls.y = fY;
+	AIBalls.z = fZ;
+	AIBalls.CharacterIndex = iChr;
+	AIBalls.Type = sCharge;
+	AIBalls.HeightMultiply = fHeight;
+	AIBalls.SizeMultiply = fSize;
+	AIBalls.TimeSpeedMultiply = fTime;
+	AIBalls.MaxFireDistance = fMaxDistance;
+	AIBalls.Dir = fDir;
+	AIBalls.SpdV0 = fSpeed;
+	AIBalls.Ang = fAngle;
+	AIBalls.Event = "";
+	EntityUpdate(1);
+	AIBalls.Add = "";
+
+	ref rCannon = GetCannonByType(iCannonType);
+	string sParticleName = "cancloud_fire";
+	if (iCannonType >= CANNON_TYPE_CANNON_LBS24 || iCannonType >= CANNON_TYPE_CULVERINE_LBS24) sParticleName = "cancloud_fire_big";
+	if (iCannonType >= CANNON_TYPE_CANNON_LBS48) sParticleName = "Bombard";
+	CreateParticleSystem(sParticleName, fX, fY, fZ, -fAngle - (fHeight - 1.0) * 0.1, fDir, 0.0, 5);
+	Play3DSound(rCannon.Sound, fX, fY, fZ);
 }
 // Logs this ship and the puppets every ~5 s (test runs).
 void CoopNet_SeaLog()

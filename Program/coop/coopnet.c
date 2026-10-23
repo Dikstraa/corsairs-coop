@@ -256,8 +256,13 @@ void CoopNet_TestSea()
 	}
 	if (bSeaActive && CoopNet_GetEnv("COOPNET_SEAFLAGS") == "1")
 	{
-		if (iCoopNetTestMapTicks == 550 && CoopNet_State() == COOPNET_HOSTING) CoopNet_TestAttack();
-		if (iCoopNetTestMapTicks == 750 && CoopNet_State() == COOPNET_CONNECTED) CoopNet_TestAttack();
+		if (iCoopNetTestMapTicks == 650 && CoopNet_State() == COOPNET_CONNECTED)
+		{
+			CoopNet_Log("test: client fires a broadside");
+			Ship_DoFire();
+		}
+		if (iCoopNetTestMapTicks == 750 && CoopNet_State() == COOPNET_HOSTING) CoopNet_TestAttack();
+		if (iCoopNetTestMapTicks == 800 && CoopNet_State() == COOPNET_CONNECTED) CoopNet_TestAttack();
 	}
 	if (false)
 	{
@@ -297,8 +302,8 @@ void CoopNet_TestFlags()
 	SetCompanionIndex(pchar, -1, iMate);
 	CoopNet_Log("test: client sails under England with companion " + rMate.id);
 }
-// COOPNET_SEAFLAGS=1 at sea: the host's hull goes down to 20%, then a ball of the client's companion
-// hits the host's flagship for 500.
+// COOPNET_SEAFLAGS=1 at sea: the client fires a broadside, the host's hull goes down to 20%, then a ball
+// of the client's companion hits the host's flagship for 500.
 void CoopNet_TestAttack()
 {
 	if (CoopNet_State() == COOPNET_HOSTING)
@@ -611,6 +616,11 @@ void CoopNet_Dispatch(int iType)
 	if (iType == COOPNET_MSG_SEA_SINK)
 	{
 		CoopNet_OnSeaSink(iFrom);
+		return;
+	}
+	if (iType == COOPNET_MSG_SEA_SHOTS)
+	{
+		CoopNet_OnSeaShots(iFrom);
 		return;
 	}
 

@@ -122,6 +122,10 @@ Hits and sinkings (`CoopNet_SeaHullHit` at the top of `Ship_ApplyHullHitpoints(W
 - A ship that sinks is reported to everybody with whoever finished it. The puppet then sinks through
   `ShipDead` with the killer's ship on that machine: the real ship on the killer's machine, so the
   kill, experience and statistics go to the player who finished it, as in the single-player game.
+- Every ball a ship fires (`CoopNet_SeaBallFired` at the end of `Ball_AddBall`, after the shooter's
+  dispersion) is queued and sent once per tick; elsewhere the same ball flies from the puppet
+  (shifted by the puppet's offset from the real ship), with smoke and sound. Being a puppet's ball,
+  its hits are only for show.
 - Puppets make no decisions of their own (`Ship_CheckSituation` skips them), turn at any speed and
   slow down to turn when their goal is off the bow.
 

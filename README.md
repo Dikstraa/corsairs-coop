@@ -58,10 +58,17 @@ other player is shown as a ship (a merchant-type encounter marked `coopAvatar`).
 WorldMap.dll treats encounter attributes as output only: writing `x`/`gotox` changes nothing, and an
 encounter can only be created (`MSG_WORLDMAP_CREATEENC_MER_XZ`) or deleted (`needDelete` +
 `worldMap.deleteUpdate = ""`). So an avatar is created slightly ahead of the player along its course
-(encounters start from a standstill) and re-created when it drifts more than 20 map units or the
-course turns by more than ~35°. A parked player is a ship crawling at kSpeed 0.0001. Running into
-an avatar doesn't start a battle (`wdmEvent_ShipEncounter`, `INTERFACE/map.c` skip it); leftovers
-from an earlier visit are purged when the map opens.
+(encounters start from a standstill) and re-created when it drifts more than 20 map units from
+where the player is now (its last report carried forward with the speed it measured itself; the
+receiver can't measure it, reports arrive unevenly) or the course turns by more than ~35°. A parked
+player is a ship crawling at kSpeed 0.0001. Running into an avatar doesn't start a battle
+(`wdmEvent_ShipEncounter`, `INTERFACE/map.c` skip it); leftovers from an earlier visit are purged
+when the map opens.
+
+A new encounter gets its `x`/`z` only when the map runs next, and a deleted one goes only when the
+map runs next and still finds its `needDelete`: its attributes must stay (the map drops them itself
+when it opens again, as the game does). While a dialog holds the map, an avatar waits instead of
+being made again every tick (that once left dozens of copies of a player on the map).
 
 The world map keeps its own clock and ignores the time written back to it, so in a session its
 speed (`worldMap.date.hourPerSec`) is steered: the shared pace plus a correction that closes the
@@ -118,14 +125,17 @@ comes back with them there.
 
 - A player's death rolls the whole world back. `GameOver` (seadogs.c) asks `CoopNet_GameOver` first:
   a client tells the host and goes through the usual death screen to the main menu; the host loads
-  its latest save (`CoopNet_NewestFile` on its save folder) a few seconds later, or at once when it
-  is the host that died.
+  its latest save of this game a few seconds later, or at once when it is the host that died
+  (`CoopNet_RollbackSave`: a save written since the game was started, else the one it was loaded
+  from; never an older file from the folder).
 - Whatever game the host starts or loads (also a save it picks itself), it tells everybody: the
   world is sent again and every client asks for its hero, which comes from that save
   (`CoopNetGuests` is saved with it). A client the save doesn't know yet starts a new game with the
   usual hero creation.
 - While any other player boards (`bAbordageStarted`, sent with the presence), this player's game
   stands still (time scale 0, held every tick since menus reset it) until the boarding is over.
+  The own cabin and deck are boarding locations too (`bCabinStarted`, `bDeckBoatStarted`) and
+  don't count.
 - A puppet taken by boarding (`ShipTaken`, `ShipTakenFree`, or sunk by `ShipDead` here) is reported
   to its own machine, which loses that ship with this player as its killer; the taken character
   stops being a puppet here.
@@ -207,6 +217,23 @@ when the ships close in under way, so standing next to an avatar alone doesn't t
 
 `run_pair.ps1 -NewGame -ToSea`: both instances go from the world map to the sea, the host sets sail
 and ~40 s later returns to the map. `-SeaJoin`: only the host goes; the client joins it from the map.
+
+## Players on land
+
+`Program/coop/coop_land.c`: every player on land (a town, jungle, house; not at sea, so not in a
+cabin, on a deck or boarding, and not in the hero selection room) sends its location, position,
+heading, speed, drawn blade and look (model, animation, name) four times a second; the host passes
+it on. Locations are the same for everybody, so positions are used as they come.
+
+Another player in the same location is a puppet character `CoopLand_<id>` with that player's model:
+actor type, immortal, no dialog. It runs (`Runto point`) or walks (`Goto point`) to where the player
+will be half a second later, is put in place when it falls more than 6 m behind, turns to the
+player's heading when it stands, and draws its blade with the player. A puppet is sent away
+(`location = "none"`) when its player leaves or this player's location unloads, so the game never
+logs it in again when it loads that location.
+
+`run_pair.ps1 -NewGame -TestLand`: both go to Bridgetown; the client runs 10 m and back, then draws
+its blade (measured: a running puppet up to 3 m behind, a standing one 0.2 m).
 
 ## Script API
 

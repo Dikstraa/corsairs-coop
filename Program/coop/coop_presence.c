@@ -5,9 +5,10 @@
 // map position is shown as a ship ("avatar"): a world map encounter sailing where that player sails.
 // WorldMap.dll ignores attribute writes to encounters, so an avatar can't be steered: it is created
 // slightly ahead of the player (encounters start from a standstill) and re-created when it drifts
-// too far or the course changes.
+// too far from where the player is now (last report + its speed since) or the course changes.
+// Every player measures its own map speed (the receiver can't: reports arrive unevenly).
 
-#define COOPNET_MSG_PRESENCE		110		// int id, int mode, int hasMap, float x, float z, float ay, string place, string name, int busy (boarding)
+#define COOPNET_MSG_PRESENCE		110		// int id, int mode, int hasMap, float x, float z, float ay, string place, string name, int busy (boarding), float vx, float vz
 #define COOPNET_PRESENCE_TICKS		10		// send every 10 ticks = 0.5 s
 #define COOPNET_PRESENCE_PERIOD		0.5
 #define COOPNET_PRESENCE_STALE		20		// periods without news (10 s) before a player is dropped
@@ -16,13 +17,19 @@
 #define COOPNET_AVATAR_MOVING		0.5		// map units per second: below that the player is parked
 #define COOPNET_AVATAR_SPEED_UNIT	14.8	// encounter speed at kSpeed 1 (measured)
 #define COOPNET_AVATAR_LEAD			1.5		// seconds ahead an avatar starts, to make up for accelerating
+#define COOPNET_AVATAR_MAX_GUESS	2.0		// seconds a report is carried forward at most
 
-object CoopNetPlayers;	// p<id>: id, name, mode, hasMap, x, z, ay, vx, vz, place, busy, age; enc* while an avatar exists
+object CoopNetPlayers;	// p<id>: id, name, mode, hasMap, x, z, ay, vx, vz, at, place, busy, age; enc* while an avatar exists
 int iCoopNetPresenceTicks = 0;
 bool bCoopNetHasMapPos = false;
 float fCoopNetMapX = 0.0;
 float fCoopNetMapZ = 0.0;
 float fCoopNetMapAY = 0.0;
+float fCoopNetSpeedX = 0.0;		// our own map speed, measured between two presence sends
+float fCoopNetSpeedZ = 0.0;
+float fCoopNetSpeedFromX = 0.0;
+float fCoopNetSpeedFromZ = 0.0;
+float fCoopNetSpeedFromAt = -1.0;
 bool bCoopNetAvatarsReady = false;	// stale avatars purged since the map was opened
 float fCoopNetMapOpenedAt = 0.0;	// CoopNet_Seconds when the world map last opened
 
@@ -49,9 +56,11 @@ void CoopNet_PresenceTick()
 		string sName = CoopNet_PeerName(iMe);
 		string sPlace = CoopNet_PresencePlace();
 		CoopNet_AgePresence();
-		CoopNet_StorePresence(iMe, iCoopNetMode, bCoopNetHasMapPos, fCoopNetMapX, fCoopNetMapZ, fCoopNetMapAY, sPlace, sName);
+		CoopNet_MeasureSpeed();
+		CoopNet_StorePresence(iMe, iCoopNetMode, bCoopNetHasMapPos, fCoopNetMapX, fCoopNetMapZ, fCoopNetMapAY, sPlace, sName, fCoopNetSpeedX, fCoopNetSpeedZ);
 		string sMe = "p" + iMe;
-		CoopNetPlayers.(sMe).busy = bAbordageStarted;
+		// the cabin and the deck are boarding locations too, but nobody fights there
+		CoopNetPlayers.(sMe).busy = bAbordageStarted && !bCabinStarted && !bDeckBoatStarted;
 		if (iState == COOPNET_HOSTING) CoopNet_BroadcastPresence();
 		else CoopNet_SendPresence(iMe, COOPNET_HOST_ID);
 	}
@@ -66,23 +75,34 @@ string CoopNet_PresencePlace()
 	return "";
 }
 
+// Our map speed over the real time since the last send; 0 off the map.
+void CoopNet_MeasureSpeed()
+{
+	float fNow = CoopNet_Seconds();
+	if (!IsEntity(&worldMap))
+	{
+		fCoopNetSpeedX = 0.0;
+		fCoopNetSpeedZ = 0.0;
+		fCoopNetSpeedFromAt = -1.0;
+		return;
+	}
+	if (fCoopNetSpeedFromAt > 0.0 && fNow - fCoopNetSpeedFromAt > 0.1)
+	{
+		float fDt = fNow - fCoopNetSpeedFromAt;
+		fCoopNetSpeedX = (fCoopNetMapX - fCoopNetSpeedFromX) / fDt;
+		fCoopNetSpeedZ = (fCoopNetMapZ - fCoopNetSpeedFromZ) / fDt;
+	}
+	fCoopNetSpeedFromX = fCoopNetMapX;
+	fCoopNetSpeedFromZ = fCoopNetMapZ;
+	fCoopNetSpeedFromAt = fNow;
+}
+
 // ---- table -----------------------------------------------------------------------
 
-void CoopNet_StorePresence(int iId, int iMode, bool bHasMap, float fX, float fZ, float fAY, string sPlace, string sName)
+void CoopNet_StorePresence(int iId, int iMode, bool bHasMap, float fX, float fZ, float fAY, string sPlace, string sName, float fVX, float fVZ)
 {
 	string sKey = "p" + iId;
-	float fVX = 0.0;
-	float fVZ = 0.0;
-	if (CheckAttribute(&CoopNetPlayers, sKey + ".x"))
-	{
-		// speed only between two real map positions (not from the 0,0 before the first one)
-		if (bHasMap && sti(CoopNetPlayers.(sKey).hasMap))
-		{
-			fVX = (fX - stf(CoopNetPlayers.(sKey).x)) / COOPNET_PRESENCE_PERIOD;
-			fVZ = (fZ - stf(CoopNetPlayers.(sKey).z)) / COOPNET_PRESENCE_PERIOD;
-		}
-	}
-	else
+	if (!CheckAttribute(&CoopNetPlayers, sKey + ".x"))
 	{
 		CoopNet_Log("presence: player " + iId + " '" + sName + "' seen");
 	}
@@ -95,6 +115,7 @@ void CoopNet_StorePresence(int iId, int iMode, bool bHasMap, float fX, float fZ,
 	CoopNetPlayers.(sKey).ay = fAY;
 	CoopNetPlayers.(sKey).vx = fVX;
 	CoopNetPlayers.(sKey).vz = fVZ;
+	CoopNetPlayers.(sKey).at = CoopNet_Seconds();
 	CoopNetPlayers.(sKey).place = sPlace;
 	CoopNetPlayers.(sKey).age = 0;
 }
@@ -158,6 +179,8 @@ void CoopNet_SendPresence(int iId, int iTo)
 	int iBusy = 0;
 	if (CheckAttribute(arP, "busy")) iBusy = sti(arP.busy);
 	CoopNet_PutInt(iBusy);
+	CoopNet_PutFloat(stf(arP.vx));
+	CoopNet_PutFloat(stf(arP.vz));
 	CoopNet_Send(iTo, COOPNET_UNRELIABLE);
 }
 
@@ -185,9 +208,11 @@ void CoopNet_OnPresence(int iFrom)
 	string sPlace = CoopNet_GetString();
 	string sName = CoopNet_GetString();
 	int iBusy = CoopNet_GetInt();
+	float fVX = CoopNet_GetFloat();
+	float fVZ = CoopNet_GetFloat();
 	if (iId == CoopNet_MyId()) return;
 	if (CoopNet_State() == COOPNET_HOSTING && iId != iFrom) return; // clients speak only for themselves
-	CoopNet_StorePresence(iId, iMode, iHasMap, fX, fZ, fAY, sPlace, sName);
+	CoopNet_StorePresence(iId, iMode, iHasMap, fX, fZ, fAY, sPlace, sName, fVX, fVZ);
 	string sKey = "p" + iId;
 	CoopNetPlayers.(sKey).busy = iBusy;
 }
@@ -234,11 +259,21 @@ void CoopNet_AvatarSync(aref arP)
 	float fVZ = stf(arP.vz);
 	float fSpeed = sqrt(fVX * fVX + fVZ * fVZ);
 	bool bMoving = fSpeed >= COOPNET_AVATAR_MOVING;
+	if (bMoving)
+	{
+		// where the player is now: it kept sailing since the report
+		float fAge = CoopNet_Seconds() - stf(arP.at);
+		if (fAge > COOPNET_AVATAR_MAX_GUESS) fAge = COOPNET_AVATAR_MAX_GUESS;
+		fX = fX + fVX * fAge;
+		fZ = fZ + fVZ * fAge;
+	}
 
 	if (CheckAttribute(arP, "enc"))
 	{
 		string sEnc = arP.enc;
 		bool bRecreate = true;
+		// a new encounter gets its position when the map runs next (not while a dialog holds it)
+		if (CheckAttribute(&worldMap, "encounters." + sEnc) && !CheckAttribute(&worldMap, "encounters." + sEnc + ".x")) return;
 		if (CheckAttribute(&worldMap, "encounters." + sEnc + ".x"))
 		{
 			float fDX = fX - stf(worldMap.encounters.(sEnc).x);
@@ -300,13 +335,18 @@ void CoopNet_AvatarRemove(aref arP)
 	if (IsEntity(&worldMap)) CoopNet_DeleteEncounter(sEnc);
 }
 
-// needDelete + deleteUpdate makes WorldMap.dll drop the encounter (it keeps the attributes).
+// needDelete + deleteUpdate makes WorldMap.dll drop the encounter when the map runs next; its
+// attributes must stay till then (the map drops them itself when it opens next, as the game does).
 void CoopNet_DeleteEncounter(string sEnc)
 {
 	if (!CheckAttribute(&worldMap, "encounters." + sEnc)) return;
+	if (!IsEntity(&worldMap))
+	{
+		DeleteAttribute(&worldMap, "encounters." + sEnc);
+		return;
+	}
 	worldMap.encounters.(sEnc).needDelete = "coop";
 	worldMap.deleteUpdate = "";
-	DeleteAttribute(&worldMap, "encounters." + sEnc);
 }
 
 void CoopNet_ForgetAvatarIds()

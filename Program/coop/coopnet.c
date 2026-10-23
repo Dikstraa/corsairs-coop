@@ -616,6 +616,7 @@ void CoopNet_Tick()
 	CoopNet_WorldTick();
 	CoopNet_EncTick();
 	CoopNet_SeaTick();
+	CoopNet_LandTick();
 	CoopNet_HeroTick();
 	CoopNet_RulesTick();
 	CoopNet_LogClock();
@@ -627,6 +628,7 @@ void CoopNet_Tick()
 	CoopNet_TestMenu();
 	CoopNet_TestHero();
 	CoopNet_TestRules();
+	CoopNet_TestLand();
 	int iType = CoopNet_Recv();
 	while (iType != 0)
 	{
@@ -653,6 +655,7 @@ void CoopNet_OnLocationLoad()
 void CoopNet_OnLocationUnload()
 {
 	bCoopNetInLocation = false;
+	CoopNet_LandForgetScene();
 }
 
 // Called at the end of NewGame_continue() and OnLoad() in seadogs.c: the host's world (new or
@@ -819,6 +822,7 @@ void CoopNet_Dispatch(int iType)
 	if (CoopNet_EncDispatch(iType, iFrom)) return;
 	if (CoopNet_HeroDispatch(iType, iFrom)) return;
 	if (CoopNet_RulesDispatch(iType, iFrom)) return;
+	if (CoopNet_LandDispatch(iType, iFrom)) return;
 	if (iType == COOPNET_MSG_SEA)
 	{
 		CoopNet_OnSea(iFrom);
@@ -968,3 +972,4 @@ void CoopNet_Dispatch(int iType)
 #include "coop\coop_sea.c"
 #include "coop\coop_heroes.c"
 #include "coop\coop_rules.c"
+#include "coop\coop_land.c"

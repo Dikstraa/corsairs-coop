@@ -234,12 +234,35 @@ void CoopNet_TestMap()
 			break;
 		}
 	}
+	if (CoopNet_GetEnv("COOPNET_TOSEA") == "1") CoopNet_TestSea();
 	if (!IsEntity(&worldMap) || CoopNet_State() != COOPNET_HOSTING) return;
 	if (iCoopNetTestMapTicks - (iCoopNetTestMapTicks / 100) * 100 != 0 || iCoopNetTestMapTicks > 1000) return;
 	float fX = stf(worldMap.playerShipX) + 40.0;
 	worldMap.playerShipX = fX;
 	worldMap.playerShipUpdate = "";
 	CoopNet_Log("test: host jumps to x " + fX + ", map says " + worldMap.playerShipX);
+}
+
+// COOPNET_TOSEA=1 (with COOPNET_TOMAP): ~10 s on the map both leave it for the sea, the client 2 map units
+// (100 sea units) east of the host; ~10 s later the host sets full sails, ~40 s later it goes back to\r\n// the map.
+void CoopNet_TestSea()
+{
+	if (iCoopNetTestMapTicks == 300 && IsEntity(&worldMap))
+	{
+		if (CoopNet_State() == COOPNET_CONNECTED) worldMap.playerShipX = stf(worldMap.playerShipX) + 2.0;
+		CoopNet_Log("test: to the sea from map x " + worldMap.playerShipX);
+		wdmReloadToSea();
+	}
+	if (iCoopNetTestMapTicks == 550 && bSeaActive && CoopNet_State() == COOPNET_HOSTING)
+	{
+		CoopNet_Log("test: host sets full sails");
+		Ship_SetSailState(nMainCharacterIndex, 1.0);
+	}
+	if (iCoopNetTestMapTicks == 1100 && bSeaActive && CoopNet_State() == COOPNET_HOSTING)
+	{
+		CoopNet_Log("test: host goes back to the map");
+		Sea_MapLoad();
+	}
 }
 
 // COOPNET_TESTSKIP=1: ~10 s into the game this player sleeps 8 hours through WaitDate.
@@ -316,6 +339,7 @@ void CoopNet_Tick()
 	CoopNet_PresenceTick();
 	CoopNet_WorldTick();
 	CoopNet_EncTick();
+	CoopNet_SeaTick();
 	CoopNet_LogClock();
 	CoopNet_TestNewGame();
 	CoopNet_TestSkip();
@@ -517,6 +541,11 @@ void CoopNet_Dispatch(int iType)
 	}
 	if (CoopNet_WorldDispatch(iType, iFrom)) return;
 	if (CoopNet_EncDispatch(iType, iFrom)) return;
+	if (iType == COOPNET_MSG_SEA)
+	{
+		CoopNet_OnSea(iFrom);
+		return;
+	}
 
 	if (iType > COOPNET_MSG_TEST_ECHO)
 	{
@@ -616,3 +645,4 @@ void CoopNet_Dispatch(int iType)
 #include "coop\coop_presence.c"
 #include "coop\coop_world.c"
 #include "coop\coop_encounters.c"
+#include "coop\coop_sea.c"

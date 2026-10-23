@@ -3721,6 +3721,11 @@ void Ship_UpdateParameters()
 		//arCharShip.MaxSpeedY = 0.75 * stf(arCharShip.MaxSpeedY);
 		arCharShip.MaxSpeedZ = (1.0 * stf(arCharShip.MaxSpeedZ));
 	}
+	if (CheckAttribute(rCharacter, "coopSpeed")) // co-op puppet: speed set from the other player's ship
+	{
+		arCharShip.MaxSpeedZ = rCharacter.coopSpeed;
+		arCharShip.MaxSpeedY = (1.5 * stf(arCharShip.MaxSpeedY));
+	}
 	//Log_Info("MaxSpeedY = "  + arCharShip.MaxSpeedY);
 	// calculate immersion
 	float fLoad = Clampf(GetCargoLoad(rCharacter) / stf(rShip.Capacity));

@@ -90,6 +90,25 @@ warring ships, floating barrels) are the same for everybody. Quest encounters an
   the traffic.
 - A new world on the host (new game, load) makes everybody forget the list.
 
+## Players at sea
+
+`Program/coop/coop_sea.c`: players at sea in the same place see each other's ships.
+
+- Every player at sea sends its ship four times a second (island, position, heading, speed, ship
+  type); the host passes it on. Near an island positions are in the island's sea coordinates, the
+  same for everybody there. In open sea each scene is centred where its player left the world map,
+  so positions travel as world map coordinates and are turned back into the receiver's own.
+- Another player within 2500 sea units is a "puppet": a friendly NPC with a ship of the same type
+  that sails (AI move task) for a point ahead of that player's ship. Its top speed is the player's
+  speed plus a share of the distance it is behind (`coopSpeed`, applied in `Ship_UpdateParameters`),
+  so it catches up without overshooting: in tests it stays 7–25 sea units off.
+- Ships in a running sea scene can't be moved or removed (`Group_SetXZ_AY` and writes to `Ship.Pos`
+  are ignored), so a puppet is created where its player is, and when the player leaves the scene it
+  sails away and comes back when the player does.
+
+`run_pair.ps1 -NewGame -ToSea`: both instances go from the world map to the sea, the host sets sail
+and ~40 s later returns to the map.
+
 ## Script API
 
 ```c
@@ -148,6 +167,8 @@ Test without clicking through menus: `run_pair.ps1 -NewGame` starts both instanc
 - `default:` labels are global: `seadogs.c` already has one, a second one fails to compile.
 - `ClearEvents()` (game load, teleport) drops posted events; the CoopNet tick must be restarted after it.
 - Compile errors go to `error.log`; the failing function then misbehaves silently.
+- Results through `ref` float parameters are unreliable: the callee's own locals end up in them.
+  Return such results through attributes.
 
 ## Requirements
 

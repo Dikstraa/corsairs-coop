@@ -350,7 +350,7 @@ bool CoopNet_WorldDispatch(int iType, int iFrom)
 	{
 		bCoopNetWorldSynced = true;
 		CoopNet_Log("world: the host's world has arrived");
-		Log_Info("CoopNet: the host's world has arrived");
+		Log_Info("Кооператив: мир хоста загружен");
 		return true;
 	}
 	if (iState == COOPNET_CONNECTED && iFrom != COOPNET_HOST_ID) return true;

@@ -982,7 +982,7 @@ void CoopNet_SeaOfferJoin()
 	}
 	if (sBest != sCoopNetSeaOffer || CoopNet_Seconds() - fCoopNetSeaOfferedAt > COOPNET_SEA_OFFER_EVERY)
 	{
-		Log_Info(CoopNetSea.(sBest).name + " is at sea nearby: F9 to join");
+		Log_Info("Кооператив: " + CoopNetSea.(sBest).name + " в море рядом, F9 - присоединиться");
 		fCoopNetSeaOfferedAt = CoopNet_Seconds();
 	}
 	sCoopNetSeaOffer = sBest;
@@ -1013,7 +1013,7 @@ void CoopNet_MeetAvatar(int iIndex)
 void CoopNet_SeaJoin(string sKey)
 {
 	CoopNet_Log("sea: joining player " + CoopNetSea.(sKey).id + " at sea");
-	Log_Info("Joining " + CoopNetSea.(sKey).name + " at sea");
+	Log_Info("Кооператив: идём к " + CoopNetSea.(sKey).name);
 	sCoopNetSeaJoin = sKey;
 	sCoopNetSeaOffer = "";
 	wdmReloadToSea();

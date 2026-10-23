@@ -23,7 +23,7 @@ using namespace mael;
 namespace
 {
 
-constexpr long kVersion = 4;
+constexpr long kVersion = 5;
 
 // Message types 10..99 are handled inside the DLL and never reach scripts.
 enum : uint16_t
@@ -196,6 +196,12 @@ DWORD __cdecl N_UseSteam(VS_STACK *s)
         g_active = g_steam;
     }
     return Return(s, 1L);
+}
+
+// int CoopNet_Invite()  opens the Steam overlay's invite dialog (or friends list); 0 without Steam
+DWORD __cdecl N_Invite(VS_STACK *s)
+{
+    return Return(s, static_cast<long>(g_active == g_steam && g_steam && g_steam->OpenInviteDialog()));
 }
 
 // int CoopNet_UseUdp()  switch to the direct UDP transport (LAN, VPN, forwarded port)
@@ -936,6 +942,7 @@ const Native kNatives[] = {
     {"CoopNet_Config", "string", 1, N_Config},
     {"CoopNet_SetLocalRate", "int", 1, N_SetLocalRate},
     {"CoopNet_Seconds", "float", 0, N_Seconds},
+    {"CoopNet_Invite", "int", 0, N_Invite},
 };
 
 class COOPNET : public SCRIPT_LIBRIARY
@@ -982,11 +989,26 @@ std::unique_ptr<coopnet::Session> coopnet::CreateSteamSession(std::string &err)
     err = "built without the Steamworks SDK";
     return nullptr;
 }
+bool coopnet::StartSteamEarly(std::string &err)
+{
+    err = "built without the Steamworks SDK";
+    return false;
+}
 #endif
 
 extern "C" __declspec(dllexport) VMA *__cdecl DMAInterface(VAPI *api, VSYSTEM_API *)
 {
     g_api = api;
     coopnet::SetSessionLog([](const char *line) { Log("%s", line); });
+    // Over Steam the overlay has to be in place before the renderer creates its device: modules are
+    // loaded before that, scripts start after it.
+    char transport[32] = {};
+    GetPrivateProfileStringA("coop", "transport", "", transport, sizeof transport, ".\\coop.ini");
+    if (_stricmp(transport, "steam") == 0)
+    {
+        std::string err;
+        if (!coopnet::StartSteamEarly(err))
+            Log("steam: not started at launch: %s", err.c_str());
+    }
     return g_moduleClassRoot;
 }

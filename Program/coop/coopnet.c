@@ -83,10 +83,10 @@ native int CoopNet_UseUdp();
 native string CoopNet_Config(string key);
 native int CoopNet_SetLocalRate(float gameSecondsPerSecond);
 native float CoopNet_Seconds();
+native int CoopNet_Invite();
 
 #library "COOPNET"
 
-#event_handler("CoopNet_Tick", "CoopNet_Tick");
 
 bool bCoopNetTicking = false;
 bool bCoopNetSteam = false; // Steam transport: keep ticking while offline so accepted invites are noticed
@@ -119,9 +119,15 @@ void CoopNet_Init()
 	if (sTest == "") CoopNet_StartFromConfig();
 }
 
+// mode=auto hosts when no friend's game is found.
+bool bCoopNetAutoHost = false;
+int iCoopNetAutoPort = COOPNET_DEFAULT_PORT;
+int iCoopNetAutoMax = 4;
+string sCoopNetAutoName = "";
+
 // coop.ini next to Maelstrom.exe:
 //   [coop]
-//   mode=host | join | off
+//   mode=host | join | auto | off   (auto: join a friend's game if there is one, else host)
 //   transport=steam | udp
 //   address=   udp: host IP; steam: empty = a friend's game, part of the host's name, or lobby:<id>
 //   port=47600   (udp)
@@ -141,7 +147,7 @@ void CoopNet_StartFromConfig()
 		bCoopNetSteam = true;
 		CoopNet_StartTick();
 	}
-	if (sMode != "host" && sMode != "join") return;
+	if (sMode != "host" && sMode != "join" && sMode != "auto") return;
 
 	int iPort = COOPNET_DEFAULT_PORT;
 	string sValue = CoopNet_Config("port");
@@ -153,11 +159,59 @@ void CoopNet_StartFromConfig()
 	string sAddress = CoopNet_Config("address");
 	if (!bCoopNetSteam && sAddress == "") sAddress = "127.0.0.1";
 
+	iCoopNetAutoPort = iPort;
+	iCoopNetAutoMax = iMax;
+	sCoopNetAutoName = sName;
+	if (sMode == "auto") bCoopNetAutoHost = true;
 	bool bOk;
-	if (sMode == "host") bOk = CoopNet_Host(iPort, iMax, sName);
+	if (sMode == "host") bOk = CoopNet_StartHosting();
 	else bOk = CoopNet_Connect(sAddress, iPort, sName);
 	if (bOk) CoopNet_StartTick();
 	else CoopNet_Log(sMode + " failed: " + CoopNet_LastError());
+}
+
+
+bool CoopNet_StartHosting()
+{
+	bCoopNetAutoHost = false;
+	if (iCoopNetAutoPort <= 0) iCoopNetAutoPort = COOPNET_DEFAULT_PORT; // global initializers don't take #defines
+	if (iCoopNetAutoMax <= 0) iCoopNetAutoMax = 4;
+	if (!CoopNet_Host(iCoopNetAutoPort, iCoopNetAutoMax, sCoopNetAutoName)) return false;
+	CoopNet_Notice("Кооператив: игра создана, друзья могут подключиться");
+	return true;
+}
+
+// The co-op button of the Esc menu (INTERFACE/game_menu.c): opens the Steam overlay's invite dialog.
+// Not in a session yet: the first press creates the game (a Steam lobby), the next one invites.
+void CoopNet_MenuInvite()
+{
+	CoopNet_Log("menu: co-op button, state " + CoopNet_State() + ", steam " + bCoopNetSteam);
+	if (!bCoopNetSteam)
+	{
+		bCoopNetSteam = CoopNet_UseSteam();
+		if (!bCoopNetSteam)
+		{
+			CoopNet_Notice("Кооператив: Steam недоступен - запустите Steam");
+			return;
+		}
+		CoopNet_StartTick();
+	}
+	if (CoopNet_State() == COOPNET_OFFLINE)
+	{
+		if (CoopNet_StartHosting())
+		{
+			CoopNet_StartTick();
+			CoopNet_Notice("Кооператив: нажмите кнопку ещё раз, чтобы пригласить друга");
+		}
+		return;
+	}
+	if (!CoopNet_Invite()) CoopNet_Notice("Кооператив: откройте Steam (Shift+Tab), чтобы пригласить друга");
+}
+// A message on the game screen and in coopnet.log.
+void CoopNet_Notice(string sText)
+{
+	CoopNet_Log("notice: " + sText);
+	Log_Info(sText);
 }
 
 // ---- test helpers ------------------------------------------------------------
@@ -343,6 +397,21 @@ void CoopNet_TestCrewSails()
 		Ship_ApplyCrewHitpoints(rPuppet, 10.0);
 	}
 }
+int iCoopNetTestMenuTicks = 0;
+
+// COOPNET_TESTMENU=1: ~10 s into the game presses the Esc menu's co-op button twice (its function).
+void CoopNet_TestMenu()
+{
+	if (iCoopNetTestMenuTicks < 0 || CoopNet_GetEnv("COOPNET_TESTMENU") != "1") return;
+	if (!bCoopNetWorldInGame) return;
+	iCoopNetTestMenuTicks++;
+	if (iCoopNetTestMenuTicks == 200 || iCoopNetTestMenuTicks == 300)
+	{
+		CoopNet_Log("test: co-op button, state " + CoopNet_State());
+		CoopNet_MenuInvite();
+	}
+	if (iCoopNetTestMenuTicks > 300) iCoopNetTestMenuTicks = -1;
+}
 // COOPNET_TESTSKIP=1: ~10 s into the game this player sleeps 8 hours through WaitDate.
 void CoopNet_TestSkip()
 {
@@ -396,22 +465,30 @@ void CoopNet_LogClock()
 	CoopNet_Log("clock " + GetDataYear() + "-" + GetDataMonth() + "-" + GetDataDay() + " " + GetHour() + ":" + GetMinute() + " rate " + fRate);
 }
 
-// Each (re)start bumps the generation; ticks of an older chain end themselves, so a watchdog
-// restart while the old chain is still alive can't multiply the ticks.
-int iCoopNetTickGen = 0;
+// The tick runs from the engine's "frame" event, timed by real time: posted events stop while the
+// game is paused (the Esc menu sets the time scale to 0), and the network, Steam callbacks and invites
+// must go on. (A static #event_handler for "frame" is never called; ClearEvents at a game load or a
+// teleport may drop the handler, so the time hook puts it back.)
+float fCoopNetLastTick = 0.0;
 
 void CoopNet_StartTick()
 {
-	if (bCoopNetTicking) return;
 	bCoopNetTicking = true;
-	iCoopNetTickGen++;
-	PostEvent("CoopNet_Tick", COOPNET_TICK_MS, "l", iCoopNetTickGen);
+	DelEventHandler("frame", "CoopNet_Frame"); // never twice
+	SetEventHandler("frame", "CoopNet_Frame", 0);
+}
+
+void CoopNet_Frame()
+{
+	if (!bCoopNetTicking) return;
+	float fNow = CoopNet_Seconds();
+	if (fNow - fCoopNetLastTick < COOPNET_TICK_MS / 1000.0) return;
+	fCoopNetLastTick = fNow;
+	CoopNet_Tick();
 }
 
 void CoopNet_Tick()
 {
-	int iGen = GetEventData();
-	if (iGen != iCoopNetTickGen) return;
 	CoopNet_UpdateStatus();
 	CoopNet_Update();
 	CoopNet_PresenceTick();
@@ -423,6 +500,7 @@ void CoopNet_Tick()
 	CoopNet_TestSkip();
 	CoopNet_TestMap();
 	CoopNet_TestWorld();
+	CoopNet_TestMenu();
 	int iType = CoopNet_Recv();
 	while (iType != 0)
 	{
@@ -432,9 +510,7 @@ void CoopNet_Tick()
 	if (CoopNet_State() == COOPNET_OFFLINE && !bCoopNetSteam)
 	{
 		bCoopNetTicking = false;
-		return;
 	}
-	PostEvent("CoopNet_Tick", COOPNET_TICK_MS, "l", iGen);
 }
 
 // loadedLocation is an unset ref in the main menu, so location presence is tracked by events.
@@ -566,14 +642,7 @@ float CoopNet_TimeHook(float fTime, int iSource)
 	int iState = CoopNet_State();
 	bool bInSession = false;
 	if (iState == COOPNET_CONNECTED || iState == COOPNET_HOSTING) bInSession = true;
-	bool bNeedTick = bInSession;
-	if (bCoopNetSteam) bNeedTick = true;
-	if (bNeedTick && CoopNet_TickAge() > 1000)
-	{
-		// ClearEvents() (game load, teleport) dropped the posted tick
-		bCoopNetTicking = false;
-		CoopNet_StartTick();
-	}
+	if (bCoopNetTicking && CoopNet_TickAge() > 1000) CoopNet_StartTick(); // the frame handler was dropped
 	if (!bInSession) return fTime;
 
 	float fHours = CoopNet_ClockEngine(GetDataYear(), GetDataMonth(), GetDataDay(), fTime, iSource);
@@ -659,6 +728,7 @@ void CoopNet_Dispatch(int iType)
 			iId = CoopNet_GetInt();
 			sName = CoopNet_PeerName(COOPNET_HOST_ID);
 			CoopNet_Log("connected to '" + sName + "', my id " + iId);
+			CoopNet_Notice("Кооператив: подключено к игре " + sName);
 			CoopNet_WorldConnected();
 			sText = CoopNet_PeerName(iId);
 			CoopNet_Begin(COOPNET_MSG_TEST_HELLO);
@@ -671,24 +741,39 @@ void CoopNet_Dispatch(int iType)
 		case COOPNET_EVT_CONNECT_FAILED:
 			iReason = CoopNet_GetInt();
 			CoopNet_Log("connect failed, reason " + iReason);
+			if (bCoopNetAutoHost)
+			{
+				CoopNet_Log("auto: no friend's game found, hosting");
+				CoopNet_StartHosting();
+			}
+			else
+			{
+				CoopNet_Notice("Кооператив: не удалось подключиться");
+			}
 		break;
 
 		case COOPNET_EVT_PEER_JOINED:
 			iId = CoopNet_GetInt();
 			sName = CoopNet_GetString();
 			CoopNet_Log("peer " + iId + " '" + sName + "' joined, " + CoopNet_PeerCount() + " connected");
+			CoopNet_Notice("Кооператив: " + sName + " присоединился");
 		break;
 
 		case COOPNET_EVT_PEER_LEFT:
 			iId = CoopNet_GetInt();
 			iReason = CoopNet_GetInt();
 			CoopNet_Log("peer " + iId + " left, reason " + iReason);
+			sName = "игрок " + iId;
+			sText = "p" + iId;
+			if (CheckAttribute(&CoopNetPlayers, sText + ".name")) sName = CoopNetPlayers.(sText).name;
+			CoopNet_Notice("Кооператив: " + sName + " вышел");
 			CoopNet_DropPlayer(iId);
 		break;
 
 		case COOPNET_EVT_DISCONNECTED:
 			iReason = CoopNet_GetInt();
 			CoopNet_Log("disconnected from host, reason " + iReason);
+			CoopNet_Notice("Кооператив: связь с хостом потеряна");
 		break;
 
 		case COOPNET_EVT_SKIP_VOTE:

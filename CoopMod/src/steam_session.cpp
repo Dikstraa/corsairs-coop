@@ -14,6 +14,7 @@
 #include <steam/isteamnetworkingmessages.h>
 
 #include <windows.h>
+#pragma comment(lib, "advapi32.lib") // RegGetValueA
 
 #include <chrono>
 #include <cstdio>
@@ -138,6 +139,15 @@ class SteamSession final : public Session
         return true;
     }
 
+    bool OpenInviteDialog() override
+    {
+        if (state_ == State::Hosting && lobby_.IsValid())
+            SteamFriends()->ActivateGameOverlayInviteDialog(lobby_);
+        else
+            SteamFriends()->ActivateGameOverlay("Friends");
+        return true;
+    }
+
     void Disconnect() override
     {
         if (state_ == State::Connected || state_ == State::Hosting)
@@ -199,6 +209,15 @@ class SteamSession final : public Session
     bool Poll(Message &out) override
     {
         SteamAPI_RunCallbacks();
+        if (!overlayLogged_)
+        {
+            bool on = SteamUtils()->IsOverlayEnabled();
+            if (on || Now() - created_ > 60.0)
+            {
+                overlayLogged_ = true;
+                SessionLog(on ? "steam: overlay enabled (Shift+Tab)" : "steam: overlay still not enabled after 60 s");
+            }
+        }
         Receive();
         Tick();
         if (inbox_.empty())
@@ -558,6 +577,8 @@ class SteamSession final : public Session
     double connectStart_ = 0;
     double lastHello_ = 0;
     std::mt19937 rng_;
+    double created_ = Now();
+    bool overlayLogged_ = false; // when the overlay comes up (or doesn't), logged once
 
     CCallResult<SteamSession, LobbyCreated_t> lobbyCreated_;
     CCallResult<SteamSession, LobbyMatchList_t> lobbyList_;
@@ -567,8 +588,10 @@ class SteamSession final : public Session
 // A friend's invite accepted in the Steam overlay or friends list.
 void SteamSession::OnJoinRequested(GameLobbyJoinRequested_t *r)
 {
-    if (state_ == State::Hosting)
-        return; // a host doesn't drop its own game for somebody else's
+    // A host with players doesn't drop its game for somebody else's; an empty one (mode=auto found no
+    // friend's game and hosts) leaves its lobby for the friend's (Connect disconnects first).
+    if (state_ == State::Hosting && !peers_.empty())
+        return;
     std::string err;
     Connect("lobby:" + std::to_string(r->m_steamIDLobby.ConvertToUint64()), 0, name_, err);
 }
@@ -610,13 +633,20 @@ void SteamSession::OnSessionFailed(SteamNetworkingMessagesSessionFailed_t *r)
 
 } // namespace
 
-std::unique_ptr<Session> CreateSteamSession(std::string &err)
+namespace
 {
+
+// Steam API up as Spacewar; once per process.
+bool InitSteamApi(std::string &err)
+{
+    static bool initialized = false;
+    if (initialized)
+        return true;
     // steam_api64.dll is delay-loaded: without it (or without Steam running) the game still works over UDP.
     if (!LoadLibraryA("steam_api64.dll"))
     {
         err = "steam_api64.dll not found next to Maelstrom.exe";
-        return nullptr;
+        return false;
     }
     if (GetFileAttributesA("steam_appid.txt") == INVALID_FILE_ATTRIBUTES)
         if (FILE *f = fopen("steam_appid.txt", "w"))
@@ -624,19 +654,62 @@ std::unique_ptr<Session> CreateSteamSession(std::string &err)
             fprintf(f, "%u", kAppId);
             fclose(f);
         }
-    static bool initialized = false;
-    if (!initialized)
+    // Launched from the Steam library as a non-Steam game, Steam hands the process the shortcut's own
+    // ids; the API reads these first, so the game stays Spacewar either way.
+    char id[16];
+    snprintf(id, sizeof id, "%u", kAppId);
+    SetEnvironmentVariableA("SteamAppId", id);
+    SetEnvironmentVariableA("SteamGameId", id);
+    SteamErrMsg msg = {};
+    if (SteamAPI_InitEx(&msg) != k_ESteamAPIInitResult_OK)
     {
-        SteamErrMsg msg = {};
-        if (SteamAPI_InitEx(&msg) != k_ESteamAPIInitResult_OK)
-        {
-            err = std::string("Steam: ") + msg;
-            return nullptr;
-        }
-        initialized = true;
+        err = std::string("Steam: ") + msg;
+        return false;
     }
+    initialized = true;
+    return true;
+}
+
+// The Steam client puts its overlay only into games it starts itself. Loaded from the Steam folder
+// before the game creates its Direct3D device, the overlay hooks it all the same and shows (Shift+Tab)
+// for the running app, Spacewar.
+void LoadSteamOverlay()
+{
+    if (GetModuleHandleA("GameOverlayRenderer64.dll"))
+    {
+        SessionLog("steam: overlay already in the game (started from Steam)");
+        return;
+    }
+    char path[MAX_PATH] = {};
+    DWORD size = sizeof path;
+    if (RegGetValueA(HKEY_CURRENT_USER, "Software\\Valve\\Steam", "SteamPath", RRF_RT_REG_SZ, nullptr, path, &size) !=
+        ERROR_SUCCESS)
+    {
+        SessionLog("steam: Steam folder not found in the registry, no overlay");
+        return;
+    }
+    std::string dll = std::string(path) + "\\GameOverlayRenderer64.dll";
+    if (LoadLibraryA(dll.c_str()))
+        SessionLog("steam: overlay loaded from %s", dll.c_str());
+    else
+        SessionLog("steam: overlay %s failed to load, error %lu", dll.c_str(), GetLastError());
+}
+
+} // namespace
+
+bool StartSteamEarly(std::string &err)
+{
+    if (!InitSteamApi(err))
+        return false;
+    LoadSteamOverlay();
+    return true;
+}
+
+std::unique_ptr<Session> CreateSteamSession(std::string &err)
+{
+    if (!InitSteamApi(err))
+        return nullptr;
     SteamNetworkingUtils()->InitRelayNetworkAccess();
     return std::make_unique<SteamSession>();
 }
-
 } // namespace coopnet

@@ -31,6 +31,18 @@ come from an installed copy of the Ship Pack: clone this repo over the game fold
 3. Steam: the client finds a lobby hosted by a Steam friend (else any open one), or by part of the
    host's name in `address`. While the game runs, accepting a Steam invite to the host's lobby joins too.
 
+With `transport=steam` the DLL starts the Steam API (as Spacewar, `SteamAppId`/`SteamGameId` set to 480)
+as soon as the engine loads its modules, before the renderer creates its Direct3D device; that is
+what lets the Steam overlay (Shift+Tab) hook the game even when it isn't started from Steam.
+`mode=auto` (the default in `coop.ini.example`) joins a friend's game if there is one, else hosts;
+an empty host accepts a friend's invite and moves to the friend's game. In-game messages
+("Кооператив: ...") report connections.
+
+The Esc menu has a co-op button (`RESOURCE/INI/interfaces/game_menu.ini`, label `CoopInvite` in
+`RESOURCE/INI/TEXTS/russian/common.ini`): outside a session the first press creates a game, then it
+opens the Steam overlay's invite dialog. The script tick runs from the `frame` event timed by real
+time, since posted events stop while the Esc menu pauses the game.
+
 Steam P2P goes through Valve relays: no port forwarding. Two instances on one PC share a Steam
 account and can't connect to each other over Steam; test those over UDP (`run_pair.ps1`).
 

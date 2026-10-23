@@ -22,6 +22,7 @@ void InitInterface_gm(string iniName)
 	SetEventHandler("OptionsClick","OptionsClick",0);
 	SetEventHandler("QuitClick","QuitClick",0);
 	SetEventHandler("QuitProcess","QuitProcess",0);
+	SetEventHandler("CoopClick","CoopNet_MenuInvite",0); // co-op: Steam invite
 
 	SetEventHandler("ConfirmExitClick","ConfirmExitClick",0);
 	SetEventHandler("ConfirmExitCancel","ConfirmExitCancel",0);
@@ -105,6 +106,7 @@ void IDoExit(int exitCode, bool bClear)
 	DelEventHandler("OptionsClick","OptionsClick");
 	DelEventHandler("QuitClick","QuitClick");
     DelEventHandler("QuitProcess","QuitProcess");
+	DelEventHandler("CoopClick","CoopNet_MenuInvite");
 
 	DelEventHandler("ConfirmExitClick","ConfirmExitClick");
 	DelEventHandler("ConfirmExitCancel","ConfirmExitCancel");

@@ -72,6 +72,9 @@ class Session
 
     // Debug: drop this fraction (0..1) of outgoing packets.
     virtual void SetSimulatedLoss(float fraction) = 0;
+
+    // Opens a way to invite friends (Steam: the overlay's invite dialog); false when there is none.
+    virtual bool OpenInviteDialog() { return false; }
 };
 
 // Optional diagnostics sink for transports (set by the DLL to its coopnet.log).
@@ -85,5 +88,9 @@ std::unique_ptr<Session> CreateUdpSession();
 // of the host's name instead of an address. Poll() must be called regularly, even while offline,
 // so that accepted Steam invites are noticed.
 std::unique_ptr<Session> CreateSteamSession(std::string &err);
+
+// At game start, before the renderer: Steam API up as Spacewar and the Steam overlay (Shift+Tab)
+// loaded into the game. False with err set when Steam isn't available.
+bool StartSteamEarly(std::string &err);
 
 } // namespace coopnet

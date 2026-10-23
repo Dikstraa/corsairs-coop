@@ -498,6 +498,7 @@ void LoadGame()
 	// вылетам у форта НЕТ <--
 	string saveName = GetEventData();
 	DelEventHandler("evntLoad","LoadGame");
+	CoopNet_SaveLoaded(saveName); // co-op: a rollback may come back to it
 
 	string retStr="";
 	SendMessage(&GameInterface,"lse",MSG_INTERFACE_GET_SAVE_DATA,saveName,&retStr);

@@ -85,7 +85,8 @@ native int CoopNet_SetLocalRate(float gameSecondsPerSecond);
 native float CoopNet_Seconds();
 native int CoopNet_Invite();
 native string CoopNet_MyUid();
-native string CoopNet_NewestFile(string dir);
+native string CoopNet_RollbackSave(string dir);
+native int CoopNet_SaveLoaded(string path);
 
 #library "COOPNET"
 
@@ -503,6 +504,35 @@ void CoopNet_TestRules()
 	}
 }
 
+float fCoopNetStatusLogAt = 0.0;
+
+// Every 10 s in a session: where this player and every other one are, for reading coopnet.log afterwards.
+void CoopNet_LogStatus()
+{
+	int iState = CoopNet_State();
+	if (iState != COOPNET_CONNECTED && iState != COOPNET_HOSTING) return;
+	if (CoopNet_Seconds() < fCoopNetStatusLogAt) return;
+	fCoopNetStatusLogAt = CoopNet_Seconds() + 10.0;
+	string sLine = "status: me mode " + iCoopNetMode + " in '" + CoopNet_PresencePlace() + "'";
+	if (bCoopNetHasMapPos) sLine = sLine + " map " + fCoopNetMapX + " " + fCoopNetMapZ;
+	sLine = sLine + ", world in game " + bCoopNetWorldInGame + " synced " + bCoopNetWorldSynced + ", hero state " + iCoopNetHeroState;
+	aref arPlayers;
+	makearef(arPlayers, CoopNetPlayers);
+	int iNum = GetAttributesNum(arPlayers);
+	for (int i = 0; i < iNum; i++)
+	{
+		aref arP = GetAttributeN(arPlayers, i);
+		if (sti(arP.id) == CoopNet_MyId()) continue;
+		sLine = sLine + "; player " + arP.id + " '" + arP.name + "' mode " + arP.mode + " in '" + arP.place + "'";
+		if (sti(arP.hasMap)) sLine = sLine + " map " + arP.x + " " + arP.z;
+		if (CheckAttribute(arP, "enc")) sLine = sLine + " avatar " + arP.enc;
+	}
+	aref arEncs;
+	makearef(arEncs, CoopNetEncs);
+	sLine = sLine + "; shared ships " + GetAttributesNum(arEncs);
+	CoopNet_Log(sLine);
+}
+
 // COOPNET_TESTSKIP=1: ~10 s into the game this player sleeps 8 hours through WaitDate.
 void CoopNet_TestSkip()
 {
@@ -589,6 +619,7 @@ void CoopNet_Tick()
 	CoopNet_HeroTick();
 	CoopNet_RulesTick();
 	CoopNet_LogClock();
+	CoopNet_LogStatus();
 	CoopNet_TestNewGame();
 	CoopNet_TestSkip();
 	CoopNet_TestMap();

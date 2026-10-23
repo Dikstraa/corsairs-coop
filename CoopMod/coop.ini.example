@@ -1,4 +1,4 @@
-; Copy next to Maelstrom.exe as coop.ini and edit.
+; Co-op settings, read when the game starts.
 [coop]
 ; auto = join a friend's game if there is one, else create one
 ; host = create a game, join = connect to one, off = single player
@@ -14,3 +14,5 @@ port=47600
 maxplayers=3
 ; empty = your Steam name
 name=
+; 1 = the game window covers the whole screen without a frame (Alt+Tab works), 0 = an ordinary window
+borderless=1

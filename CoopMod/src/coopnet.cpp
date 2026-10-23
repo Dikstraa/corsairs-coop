@@ -23,7 +23,7 @@ using namespace mael;
 namespace
 {
 
-constexpr long kVersion = 7;
+constexpr long kVersion = 8;
 
 // Message types 10..99 are handled inside the DLL and never reach scripts.
 enum : uint16_t
@@ -210,34 +210,48 @@ DWORD __cdecl N_MyUid(VS_STACK *s)
     return Return(s, Net().LocalUid());
 }
 
-// string CoopNet_NewestFile(string dir)  name of the most recently written file in dir ("" if none):
-// the latest save, for rolling the world back
-DWORD __cdecl N_NewestFile(VS_STACK *s)
+// The saves a rollback may use: written since this game was started, or the one the host loaded.
+FILETIME g_launchTime = {};
+std::string g_loadedSave;
+
+// string CoopNet_RollbackSave(string dir)  the newer of: the latest save in dir written since the game
+// was started, the save loaded last (CoopNet_SaveLoaded); "" when there is neither
+DWORD __cdecl N_RollbackSave(VS_STACK *s)
 {
     std::string dir = ArgString(Pop(s));
     if (!dir.empty() && dir.back() != '\\' && dir.back() != '/')
         dir += '\\';
+    std::string best;
+    FILETIME bestTime = g_launchTime;
     WIN32_FIND_DATAA fd;
     HANDLE h = FindFirstFileA((dir + "*").c_str(), &fd);
-    std::string best;
-    FILETIME bestTime = {};
     if (h != INVALID_HANDLE_VALUE)
     {
         do
         {
             if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
                 continue;
-            if (best.empty() || CompareFileTime(&fd.ftLastWriteTime, &bestTime) > 0)
+            if (CompareFileTime(&fd.ftLastWriteTime, &bestTime) > 0)
             {
-                best = fd.cFileName;
+                best = dir + fd.cFileName;
                 bestTime = fd.ftLastWriteTime;
             }
         } while (FindNextFileA(h, &fd));
         FindClose(h);
     }
+    if (best.empty())
+        best = g_loadedSave;
     return Return(s, best);
 }
 
+// int CoopNet_SaveLoaded(string path)  from LoadGame: the save the game was loaded from (kept here, as a
+// load replaces the script's own variables)
+DWORD __cdecl N_SaveLoaded(VS_STACK *s)
+{
+    g_loadedSave = ArgString(Pop(s));
+    Log("save loaded: %s", g_loadedSave.c_str());
+    return Return(s, 1L);
+}
 // int CoopNet_UseUdp()  switch to the direct UDP transport (LAN, VPN, forwarded port)
 DWORD __cdecl N_UseUdp(VS_STACK *s)
 {
@@ -321,12 +335,93 @@ LRESULT CALLBACK CoopWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     if (Net().GetState() != coopnet::State::Offline)
     {
-        if (msg == WM_ACTIVATEAPP && wp == FALSE)
+        bool away = (msg == WM_ACTIVATEAPP && wp == FALSE) || (msg == WM_ACTIVATE && LOWORD(wp) == WA_INACTIVE);
+        if (away)
+        {
+            // the engine isn't told, so the mouse it holds is let go here
+            ClipCursor(nullptr);
+            ReleaseCapture();
             return 0;
-        if (msg == WM_ACTIVATE && LOWORD(wp) == WA_INACTIVE)
-            return 0;
+        }
     }
     return CallWindowProcA(g_origWndProc, hwnd, msg, wp, lp);
+}
+
+// The engine believes it is still active, so it keeps grabbing the mouse: it captures and clips the
+// cursor (Maelstrom.exe) and puts it back in the middle every frame (PCs_Controls.dll, GameUtils.dll,
+// XInterface.dll). Their imports of those calls are redirected here, where they do nothing while
+// another window is in front.
+HWND g_gameWindow = nullptr;
+
+bool GameInBackground()
+{
+    return g_gameWindow && GetForegroundWindow() != g_gameWindow;
+}
+
+long g_mouseHeldBack = 0; // calls kept from moving the mouse while the game is behind
+
+BOOL WINAPI HookSetCursorPos(int x, int y)
+{
+    if (!GameInBackground())
+        return SetCursorPos(x, y);
+    ++g_mouseHeldBack;
+    return TRUE;
+}
+
+BOOL WINAPI HookClipCursor(const RECT *rect)
+{
+    return ClipCursor(GameInBackground() ? nullptr : rect);
+}
+
+HWND WINAPI HookSetCapture(HWND hwnd)
+{
+    return GameInBackground() ? nullptr : SetCapture(hwnd);
+}
+
+// Points module's import of user32!name at hook.
+void HookImport(HMODULE module, const char *name, void *hook)
+{
+    auto base = reinterpret_cast<BYTE *>(module);
+    auto dos = reinterpret_cast<IMAGE_DOS_HEADER *>(base);
+    auto nt = reinterpret_cast<IMAGE_NT_HEADERS *>(base + dos->e_lfanew);
+    const IMAGE_DATA_DIRECTORY &dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (!dir.VirtualAddress)
+        return;
+    for (auto imp = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR *>(base + dir.VirtualAddress); imp->Name; ++imp)
+    {
+        if (_stricmp(reinterpret_cast<char *>(base + imp->Name), "user32.dll") != 0 || !imp->OriginalFirstThunk)
+            continue;
+        auto names = reinterpret_cast<IMAGE_THUNK_DATA *>(base + imp->OriginalFirstThunk);
+        auto slots = reinterpret_cast<IMAGE_THUNK_DATA *>(base + imp->FirstThunk);
+        for (; names->u1.AddressOfData; ++names, ++slots)
+        {
+            if (IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal))
+                continue;
+            auto byName = reinterpret_cast<IMAGE_IMPORT_BY_NAME *>(base + names->u1.AddressOfData);
+            if (strcmp(byName->Name, name) != 0)
+                continue;
+            DWORD old;
+            if (VirtualProtect(&slots->u1.Function, sizeof(void *), PAGE_READWRITE, &old))
+            {
+                slots->u1.Function = reinterpret_cast<ULONG_PTR>(hook);
+                VirtualProtect(&slots->u1.Function, sizeof(void *), old, &old);
+            }
+        }
+    }
+}
+
+void ReleaseMouseInBackground(HWND hwnd)
+{
+    g_gameWindow = hwnd;
+    for (const char *dll : {(const char *)nullptr, "PCs_Controls.dll", "GameUtils.dll", "XInterface.dll"})
+    {
+        HMODULE module = dll ? GetModuleHandleA(dll) : GetModuleHandleA(nullptr);
+        if (!module)
+            continue;
+        HookImport(module, "SetCursorPos", reinterpret_cast<void *>(HookSetCursorPos));
+        HookImport(module, "ClipCursor", reinterpret_cast<void *>(HookClipCursor));
+        HookImport(module, "SetCapture", reinterpret_cast<void *>(HookSetCapture));
+    }
 }
 
 BOOL CALLBACK FindGameWindow(HWND hwnd, LPARAM out)
@@ -353,7 +448,108 @@ void KeepRunningInBackground()
         return;
     g_origWndProc = reinterpret_cast<WNDPROC>(
         SetWindowLongPtrA(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(CoopWndProc)));
-    Log("window: keeps running in the background during co-op");
+    ReleaseMouseInBackground(hwnd);
+    Log("window: keeps running in the background during co-op, mouse free when another window is in front");
+    for (const char *dll : {"PCs_Controls.dll", "GameUtils.dll", "XInterface.dll"})
+        Log("window: %s %s", dll, GetModuleHandleA(dll) ? "hooked" : "not loaded");
+}
+
+// start.ini has no sections, so it can't be read with GetPrivateProfile*: "full_screen = 1".
+bool StartIniFullScreen()
+{
+    FILE *f = fopen("start.ini", "r");
+    if (!f)
+        return false;
+    char line[256];
+    bool full = false;
+    while (fgets(line, sizeof line, f))
+    {
+        int value = 0;
+        if (sscanf(line, " full_screen = %d", &value) == 1)
+            full = value != 0;
+    }
+    fclose(f);
+    return full;
+}
+
+// Borderless needs the picture in the monitor's own size, or it is stretched: before the renderer reads
+// start.ini (modules are loaded first), screen_x/screen_y are set to the primary monitor's size.
+void FitStartIniToMonitor()
+{
+    char setting[8] = {};
+    GetPrivateProfileStringA("coop", "borderless", "1", setting, sizeof setting, ".\\coop.ini");
+    if (setting[0] == '0' || StartIniFullScreen())
+        return;
+    int width = GetSystemMetrics(SM_CXSCREEN);
+    int height = GetSystemMetrics(SM_CYSCREEN);
+    FILE *f = fopen("start.ini", "rb");
+    if (!f || width <= 0 || height <= 0)
+    {
+        if (f)
+            fclose(f);
+        return;
+    }
+    std::string text, line;
+    bool changed = false;
+    int c;
+    while ((c = fgetc(f)) != EOF)
+    {
+        line += static_cast<char>(c);
+        if (c != '\n')
+            continue;
+        int value = 0;
+        if (sscanf(line.c_str(), " screen_x = %d", &value) == 1 && value != width)
+        {
+            line = "screen_x = " + std::to_string(width) + "\r\n";
+            changed = true;
+        }
+        else if (sscanf(line.c_str(), " screen_y = %d", &value) == 1 && value != height)
+        {
+            line = "screen_y = " + std::to_string(height) + "\r\n";
+            changed = true;
+        }
+        text += line;
+        line.clear();
+    }
+    text += line;
+    fclose(f);
+    if (!changed)
+        return;
+    if (FILE *out = fopen("start.ini", "wb"))
+    {
+        fwrite(text.data(), 1, text.size(), out);
+        fclose(out);
+        Log("window: start.ini set to the monitor's %dx%d", width, height);
+    }
+}
+
+// Exclusive full screen doesn't go with the above: Direct3D only lets go of the screen (Alt+Tab) when
+// the window learns it was deactivated. So the game runs windowed (start.ini full_screen = 0) and the
+// window is made borderless over its whole monitor: it looks like full screen, Alt+Tab works as for any
+// window. coop.ini borderless=0 keeps the ordinary window.
+void MakeBorderless()
+{
+    static bool done = false;
+    if (done)
+        return;
+    HWND hwnd = nullptr;
+    EnumWindows(FindGameWindow, reinterpret_cast<LPARAM>(&hwnd));
+    if (!hwnd)
+        return;
+    done = true;
+    char setting[8] = {};
+    GetPrivateProfileStringA("coop", "borderless", "1", setting, sizeof setting, ".\\coop.ini");
+    if (setting[0] == '0' || StartIniFullScreen())
+        return;
+    MONITORINFO mi = {sizeof mi};
+    if (!GetMonitorInfoA(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mi))
+        return;
+    const RECT &r = mi.rcMonitor;
+    SetWindowLongPtrA(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+    SetWindowLongPtrA(hwnd, GWL_EXSTYLE, 0);
+    SetWindowPos(hwnd, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                 SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    Log("window: borderless over the monitor, %ldx%ld", r.right - r.left, r.bottom - r.top);
 }
 
 // ---- shared clock --------------------------------------------------------------
@@ -454,6 +650,13 @@ DWORD __cdecl N_Update(VS_STACK *s)
     double now = RealNow();
     g_lastUpdate = now;
     g_local.rate = g_fixedRate > 0 ? g_fixedRate : g_meter.Rate();
+    MakeBorderless();
+    static long reported = 0;
+    if (g_mouseHeldBack - reported >= 50)
+    {
+        reported = g_mouseHeldBack;
+        Log("window: %ld mouse moves held back while the game is behind", g_mouseHeldBack);
+    }
     if (Net().GetState() != coopnet::State::Offline)
         KeepRunningInBackground();
     switch (Net().GetState())
@@ -978,7 +1181,8 @@ const Native kNatives[] = {
     {"CoopNet_Seconds", "float", 0, N_Seconds},
     {"CoopNet_Invite", "int", 0, N_Invite},
     {"CoopNet_MyUid", "string", 0, N_MyUid},
-    {"CoopNet_NewestFile", "string", 1, N_NewestFile},
+    {"CoopNet_RollbackSave", "string", 1, N_RollbackSave},
+    {"CoopNet_SaveLoaded", "int", 1, N_SaveLoaded},
 };
 
 class COOPNET : public SCRIPT_LIBRIARY
@@ -1036,6 +1240,8 @@ extern "C" __declspec(dllexport) VMA *__cdecl DMAInterface(VAPI *api, VSYSTEM_AP
 {
     g_api = api;
     coopnet::SetSessionLog([](const char *line) { Log("%s", line); });
+    GetSystemTimeAsFileTime(&g_launchTime);
+    FitStartIniToMonitor();
     // Over Steam the overlay has to be in place before the renderer creates its device: modules are
     // loaded before that, scripts start after it.
     char transport[32] = {};

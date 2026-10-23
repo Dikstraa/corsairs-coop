@@ -1,7 +1,8 @@
 // CoopNet rules: a player's death rolls the whole world back; a boarding pauses everybody else.
 //
 // Death (GameOver): a client tells the host and goes through the usual death screen to the main menu;
-// the host, a few seconds later (or at once when it is the host that died), loads its latest save.
+// the host, a few seconds later (or at once when it is the host that died), loads its latest save of this
+// game: one written since the game was started, else the one it was loaded from (never an older one).
 // Whatever save the host loads (also one it picks itself), everybody follows it: the host's world is
 // sent again and every client gets its hero as that save has it (CoopNetGuests is saved with the
 // host's game). A client the save doesn't know yet starts a new game and creates its hero.
@@ -63,15 +64,15 @@ bool CoopNet_Rollback()
 		return false;
 	}
 	string sDir = GetSaveDirectory() + PlayerProfile.name + "\";
-	string sSave = CoopNet_NewestFile(sDir);
+	string sSave = CoopNet_RollbackSave(sDir); // saved since the game was started, or the one loaded
 	if (sSave == "")
 	{
-		CoopNet_NoticeAll("Кооператив: у хоста нет сохранений, откатывать некуда");
+		CoopNet_NoticeAll("Кооператив: у хоста нет сохранения этой игры, откатывать некуда - сохранитесь");
 		return false;
 	}
-	CoopNet_Log("rules: loading " + sDir + sSave);
+	CoopNet_Log("rules: loading " + sSave);
 	SetEventHandler("evntLoad", "LoadGame", 0);
-	PostEvent("evntLoad", 0, "s", sDir + sSave);
+	PostEvent("evntLoad", 0, "s", sSave);
 	return true;
 }
 

@@ -290,7 +290,7 @@ void proc_break_video()
 
 void Main()
 {
-	CoopNet_SelfTest();
+	CoopNet_Init();
 	if (!CheckAttribute(InterfaceStates,"VISUAL_CIRASS")) InterfaceStates.VISUAL_CIRASS = 0;
 	screenscaling = BI_COMPARE_HEIGHT;
     LayerCreate("realize", 1);

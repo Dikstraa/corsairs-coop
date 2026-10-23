@@ -12,12 +12,12 @@
 // for everybody.
 // Quest encounters, storms and the players' own avatars are not shared.
 
-#define COOPNET_MSG_ENC_ADD			120	// string gid, int owner, string model, float x, z, gx, gz, k, speed, life, int hasGoal, int n, n x (string name, string value)
-#define COOPNET_MSG_ENC_POS			121	// string gid, float x, z, gx, gz, k, speed, life, int hasGoal
+#define COOPNET_MSG_ENC_ADD			120	// string gid, int owner, string model, float x, z, gx, gz, k, speed, life, int hasGoal, float vx, vz, ay, int n, n x (string name, string value)
+#define COOPNET_MSG_ENC_POS			121	// string gid, float x, z, gx, gz, k, speed, life, int hasGoal, float vx, vz, ay
 #define COOPNET_MSG_ENC_DEL			122	// string gid
 #define COOPNET_MSG_ENC_RESET		123	// host -> all: a new world, forget every entry
 #define COOPNET_ENC_SCAN_TICKS		10		// every 10 ticks = 0.5 s
-#define COOPNET_ENC_POS_PERIOD		2.0		// seconds between the owner's position reports
+#define COOPNET_ENC_POS_PERIOD		0.5		// seconds between the owner's position reports
 #define COOPNET_ENC_MAX_ERROR		30.0	// map units between a mirror and its ship before re-creation
 #define COOPNET_ENC_LEAD			1.5		// seconds ahead a mirror starts, to make up for accelerating
 
@@ -223,6 +223,26 @@ void CoopNet_EncRegister(aref arEnc, string sEnc)
 
 void CoopNet_EncReadPosition(aref arE, aref arEnc)
 {
+	// its real speed (map units a second) and heading: it sails round islands, not straight to its goal
+	float fNow = CoopNet_Seconds();
+	float fX = stf(arEnc.x);
+	float fZ = stf(arEnc.z);
+	arE.vx = 0.0;
+	arE.vz = 0.0;
+	if (CheckAttribute(arE, "px") && CheckAttribute(arE, "pat"))
+	{
+		float fDt = fNow - stf(arE.pat);
+		if (fDt > 0.1 && fDt < 5.0)
+		{
+			arE.vx = (fX - stf(arE.px)) / fDt;
+			arE.vz = (fZ - stf(arE.pz)) / fDt;
+		}
+	}
+	arE.px = fX;
+	arE.pz = fZ;
+	arE.pat = fNow;
+	arE.ay = 0.0;
+	if (CheckAttribute(arEnc, "ay")) arE.ay = arEnc.ay;
 	arE.x = arEnc.x;
 	arE.z = arEnc.z;
 	arE.hasGoal = CheckAttribute(arEnc, "gotox");
@@ -298,21 +318,22 @@ void CoopNet_EncSyncMirrors()
 			string sEnc = arE.enc;
 			if (CheckAttribute(arE, "encDriven") && sti(arE.encDriven))
 			{
-				// CoopNet.dll drives it: where the ship is now, and its course to its goal
+				// CoopNet.dll drives it: the owner's report (its real speed and heading) carried forward
+				// to now; the DLL glides over what the next report corrects
 				if (CoopNet_MapShipAlive(sEnc))
 				{
 					float fVX = 0.0;
 					float fVZ = 0.0;
-					float fAY = stf(arE.encAY);
-					float fLeft = sqrt((fGX - fX) * (fGX - fX) + (fGZ - fZ) * (fGZ - fZ));
-					if (!bParked && fLeft > 0.5)
+					if (!bParked && CheckAttribute(arE, "vx"))
 					{
-						fVX = (fGX - fX) / fLeft * stf(arE.speed);
-						fVZ = (fGZ - fZ) / fLeft * stf(arE.speed);
-						fAY = atan2(fGX - fX, fGZ - fZ);
-						arE.encAY = fAY;
+						fVX = stf(arE.vx);
+						fVZ = stf(arE.vz);
 					}
-					if (CoopNet_MapShipSet(sEnc, fX, fZ, fVX, fVZ, fAY) != 0) continue;
+					float fAge = CoopNet_Seconds() - stf(arE.at);
+					if (fAge > 3.0) fAge = 3.0;
+					float fAY = stf(arE.encAY);
+					if (CheckAttribute(arE, "ay")) fAY = stf(arE.ay);
+					if (CoopNet_MapShipSet(sEnc, stf(arE.x) + fVX * fAge, stf(arE.z) + fVZ * fAge, fVX, fVZ, fAY) != 0) continue;
 				}
 				CoopNet_Log("enc: " + sEnc + " (" + arE.gid + ") no longer driven, made anew");
 				arE.encDriven = false;
@@ -440,6 +461,9 @@ void CoopNet_EncPutPosition(aref arE)
 	CoopNet_PutFloat(stf(arE.speed));
 	CoopNet_PutFloat(stf(arE.life));
 	CoopNet_PutInt(sti(arE.hasGoal));
+	CoopNet_PutFloat(stf(arE.vx));
+	CoopNet_PutFloat(stf(arE.vz));
+	CoopNet_PutFloat(stf(arE.ay));
 }
 
 void CoopNet_EncGetPosition(aref arE)
@@ -452,6 +476,9 @@ void CoopNet_EncGetPosition(aref arE)
 	arE.speed = CoopNet_GetFloat();
 	arE.life = CoopNet_GetFloat();
 	arE.hasGoal = CoopNet_GetInt();
+	arE.vx = CoopNet_GetFloat();
+	arE.vz = CoopNet_GetFloat();
+	arE.ay = CoopNet_GetFloat();
 	arE.at = CoopNet_Seconds();
 }
 

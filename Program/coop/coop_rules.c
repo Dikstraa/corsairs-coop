@@ -15,9 +15,15 @@
 #define COOPNET_MSG_WORLD_RELOADED	151		// host -> all: the host started or loaded a game
 #define COOPNET_MSG_HOST_NOTICE		152		// host -> all: string text for the game screen
 #define COOPNET_ROLLBACK_DELAY		4.0		// seconds between a client's death and the host's reload
+#define COOPNET_MSG_SPEED		153		// int counter + 100 (TimeScaleCounter; negatives compare as unsigned), string by
+#define COOPNET_SPEED_EVERY		5.0		// seconds between the host's reminders of the speed (for players who came in later)
 
 float fCoopNetRollbackAt = -1.0;	// host: when to load the latest save
 bool bCoopNetPausedForBoarding = false;
+int iCoopNetSpeed = 0;			// the shared TimeScaleCounter
+float fCoopNetSpeedSentAt = 0.0;
+float fCoopNetSpeedOwnAt = -10.0;	// when this player last changed the speed itself
+float fCoopNetSpeedWhyAt = 0.0;
 float fCoopNetPauseNoticeAt = 0.0;
 
 // ---- death and rollback -----------------------------------------------------------------------
@@ -98,6 +104,7 @@ void CoopNet_RulesWorldStarted()
 
 void CoopNet_RulesTick()
 {
+	CoopNet_SpeedTick();
 	int iState = CoopNet_State();
 	if (fCoopNetRollbackAt > 0.0 && iState == COOPNET_HOSTING && CoopNet_Seconds() >= fCoopNetRollbackAt) CoopNet_Rollback();
 
@@ -111,7 +118,7 @@ void CoopNet_RulesTick()
 		if (bCoopNetPausedForBoarding)
 		{
 			bCoopNetPausedForBoarding = false;
-			SetTimeScale(1.0);
+			CoopNet_SpeedSet(); // the shared speed, not just 1
 			CoopNet_Notice(" ооператив: абордаж окончен, игра продолжаетс€");
 		}
 		return;
@@ -145,6 +152,11 @@ string CoopNet_RulesBoarder()
 // Returns true when the message was a rules message.
 bool CoopNet_RulesDispatch(int iType, int iFrom)
 {
+	if (iType == COOPNET_MSG_SPEED)
+	{
+		CoopNet_OnSpeed(iFrom);
+		return true;
+	}
 	if (iType < COOPNET_MSG_PLAYER_DIED || iType > COOPNET_MSG_HOST_NOTICE) return false;
 	if (iType == COOPNET_MSG_PLAYER_DIED) CoopNet_OnPlayerDied(iFrom);
 	if (iType == COOPNET_MSG_WORLD_RELOADED)
@@ -157,4 +169,86 @@ bool CoopNet_RulesDispatch(int iType, int iFrom)
 		if (iFrom == COOPNET_HOST_ID) CoopNet_Notice(sText);
 	}
 	return true;
+}
+
+// ---- shared game speed ----------------------------------------------------------------------------
+// One speed for everybody, as the clock: whoever speeds the game up or slows it down (the time keys,
+// TimeScaleCounter) does it for all. Each player's own pauses stay its own: the speed is put back
+// when no dialog, interface or boarding pause holds its game (those set the time scale to 0 and,
+// closing, the counter back to 0).
+
+// From the time keys (seadogs.c), once this player has changed TimeScaleCounter.
+void CoopNet_SpeedChanged()
+{
+	int iState = CoopNet_State();
+	if (iState != COOPNET_CONNECTED && iState != COOPNET_HOSTING) return;
+	fCoopNetSpeedOwnAt = CoopNet_Seconds();
+	iCoopNetSpeed = TimeScaleCounter;
+	CoopNet_SpeedSend(CoopNet_PeerName(CoopNet_MyId()));
+}
+
+void CoopNet_SpeedSend(string sBy)
+{
+	CoopNet_Begin(COOPNET_MSG_SPEED);
+	CoopNet_PutInt(iCoopNetSpeed + 100);
+	CoopNet_PutString(sBy);
+	if (CoopNet_State() == COOPNET_HOSTING) CoopNet_Send(COOPNET_ALL, COOPNET_RELIABLE);
+	else CoopNet_Send(COOPNET_HOST_ID, COOPNET_RELIABLE);
+	fCoopNetSpeedSentAt = CoopNet_Seconds();
+}
+
+void CoopNet_OnSpeed(int iFrom)
+{
+	int iSpeed = CoopNet_GetInt() - 100;
+	string sBy = CoopNet_GetString();
+	// a word sent before our own change got through would undo it for a moment
+	if (CoopNet_Seconds() - fCoopNetSpeedOwnAt < 1.5 && sBy != CoopNet_PeerName(CoopNet_MyId())) return;
+	bool bNews = iSpeed != iCoopNetSpeed;
+	iCoopNetSpeed = iSpeed;
+	if (CoopNet_State() == COOPNET_HOSTING) CoopNet_SpeedSend(sBy); // everybody, the sender too
+	if (!bNews) return;
+	float fScale = 1.0 + iSpeed * 0.25;
+	CoopNet_Log("speed: x" + fScale + " by " + sBy);
+	CoopNet_Notice(" ооператив: " + sBy + " - скорость игры x" + fScale);
+	CoopNet_SpeedApply();
+}
+
+// The shared speed, unless something of this player's own holds the game.
+void CoopNet_SpeedApply()
+{
+	if (TimeScaleCounter == iCoopNetSpeed) return;
+	bool bHeld = dialogRun || bCoopNetPausedForBoarding;
+	if (CheckAttribute(&InterfaceStates, "Launched") && sti(InterfaceStates.Launched)) bHeld = true;
+	if (!bSeaActive && !bCoopNetInLocation && !IsEntity(&worldMap)) bHeld = true;
+	if (bHeld)
+	{
+		if (CoopNet_Seconds() > fCoopNetSpeedWhyAt)
+		{
+			fCoopNetSpeedWhyAt = CoopNet_Seconds() + 5.0;
+			string sWhy = "speed: x" + (1.0 + iCoopNetSpeed * 0.25) + " waits, dialog " + dialogRun + " boarding " + bCoopNetPausedForBoarding;
+			if (CheckAttribute(&InterfaceStates, "Launched")) sWhy = sWhy + " interface " + InterfaceStates.Launched;
+			CoopNet_Log(sWhy + " sea " + bSeaActive + " location " + bCoopNetInLocation + " map " + IsEntity(&worldMap) + ", counter " + TimeScaleCounter);
+		}
+		return;
+	}
+	CoopNet_SpeedSet();
+}
+
+void CoopNet_SpeedSet()
+{
+	CoopNet_Log("speed: this game at x" + (1.0 + iCoopNetSpeed * 0.25));
+	TimeScaleCounter = iCoopNetSpeed;
+	if (iCoopNetSpeed == 0) SetTimeScale(1.0);
+	else SetTimeScale(1.0 + iCoopNetSpeed * 0.25);
+}
+
+void CoopNet_SpeedTick()
+{
+	int iState = CoopNet_State();
+	if (iState != COOPNET_CONNECTED && iState != COOPNET_HOSTING) return;
+	CoopNet_SpeedApply();
+	if (iState == COOPNET_HOSTING && CoopNet_Seconds() - fCoopNetSpeedSentAt > COOPNET_SPEED_EVERY)
+	{
+		CoopNet_SpeedSend(CoopNet_PeerName(CoopNet_MyId()));
+	}
 }

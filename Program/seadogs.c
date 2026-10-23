@@ -1465,6 +1465,7 @@ void ProcessControls()
      	}
 
      	Log_SetStringToLog("x" + newTimeScale);
+	CoopNet_SpeedChanged(); // co-op: the same speed for everybody
      	if (TimeScaleCounter == 0) //back to normal
      	{
 			if(IsPerkIntoList("TimeSpeed"))

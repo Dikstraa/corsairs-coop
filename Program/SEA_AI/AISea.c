@@ -309,6 +309,9 @@ bool SeaAI_SetOfficer2ShipAfterAbordage(ref refMyCharacter, ref refEnemyCharacte
 
 int SeaAI_GetRelation(int iCharacterIndex1, int iCharacterIndex2)
 {
+	// co-op: another player's ship (a puppet) sees everybody as a friend, so its AI keeps out of the fight; what
+	// it is to this player (its flag, its owner's enemies) is kept apart, for the colours of the battle interface
+	if (iCharacterIndex2 == nMainCharacterIndex && CheckAttribute(&Characters[iCharacterIndex1], "coopRel")) return sti(Characters[iCharacterIndex1].coopRel);
  	int iRelation = RELATION_NEUTRAL;
 	/*if (bSeaActive)
 	{

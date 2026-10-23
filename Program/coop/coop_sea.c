@@ -401,6 +401,7 @@ void CoopNet_SeaSides(aref arS)
 	int iRel = CoopNet_SeaRelation(arS);
 	int iChr = sti(arS.chr);
 	Characters[iChr].nation = arS.nation;
+	Characters[iChr].coopRel = iRel; // what it is to this player, for the battle interface (SeaAI_GetRelation)
 	if (iRel == sti(arS.rel) && CheckAttribute(arS, "relShips") && sti(arS.relShips) == iNumShips) return;
 	bool bChanged = iRel != sti(arS.rel);
 	arS.rel = iRel;

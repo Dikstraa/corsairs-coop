@@ -78,7 +78,9 @@ the script means making it again and again: a jump, a turn, and the old one fadi
 
 Measured (`run_pair.ps1 -NewGame -ToMap`, the host sailing about with keys held through
 `CoopNet_TestKey`): one avatar per player for the whole run instead of 17 re-creations in 80 s,
-0.4-3 map units off, at most 0.08 units of correction in a frame; NPC mirrors no longer re-created.
+0.4-3 map units off, at most 0.08 units of correction in a frame; NPC mirrors no longer re-created. The owner reports its ships every 0.5 s with their real speed and heading
+(measured on its map: they sail round islands, and the `speed` attribute is the engine's, before the
+wind), and mirrors are carried forward with those: at most 0.27 units of correction in a frame.
 
 Names: the DLL also draws each player's name under its ship (`map_labels.cpp`): the device's
 EndScene, SetTransform and Reset are redirected (every device here has a table of its own, so the
@@ -207,6 +209,10 @@ warring ships, floating barrels) are the same for everybody. Quest encounters an
   nation and this player's flag (France against England at war: the players fight each other); an
   NPC ship by its nation's relation to this player. Sides are re-applied when flags or relations
   change (`SetCharacterRelationBoth` for the ships this machine runs, then `UpdateRelations`).
+  Relations are one-way: the puppet itself sees everybody as a friend (its AI must not fight on
+  its own: its shots come from its owner), so the battle interface, which colours a ship by its
+  relation to the player, reads the puppet's side from `coopRel` instead (`SeaAI_GetRelation`):
+  another player's pirates are red, not green.
 - A puppet's top speed is the real ship's speed plus a share of the distance it is behind (`coopSpeed`, applied in `Ship_UpdateParameters`),
   so it catches up without overshooting: in tests it stays 7–25 sea units off.
 - Ships in a running sea scene can't be moved or removed (`Group_SetXZ_AY` and writes to `Ship.Pos`
@@ -334,8 +340,14 @@ One clock for everybody, owned by the host (`coop_clock.h`):
   doesn't stop it, the others play on);
 - otherwise it runs at the pace of the slowest player that needs time to pass. Each player's
   pace is measured from how fast its own engine moves time (world map, weather on land/sea,
-  time acceleration), so acceleration only works when everybody accelerates;
-  menus and dialogs don't hold the others back.
+  time acceleration); menus and dialogs don't hold the others back.
+
+One game speed for everybody (`coop_rules.c`): the time keys (`TimeScaleCounter`, seadogs.c calls
+`CoopNet_SpeedChanged`) change it for all players, the last change wins (`MSG_SPEED`, the host
+repeats it every 5 s for players who came in later; for 1.5 s after its own change a player ignores
+older words). A player's own pauses stay its own: the speed is put back only when no dialog,
+interface (`InterfaceStates.Launched`) or boarding pause holds its game, as interfaces closing set
+the counter back to 0. So everybody accelerates together, and the clock with them.
 
 Hooks: `Whr_TimeUpdate` (WhrWeather.c) and `wdmEvent_UpdateDate` (worldmap_events.c) pass the
 engine's proposed time through `CoopNet_TimeHook`, which applies the shared date and time.

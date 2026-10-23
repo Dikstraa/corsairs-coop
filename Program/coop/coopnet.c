@@ -279,6 +279,7 @@ void CoopNet_TestMap()
 	if (iCoopNetTestMapTicks < 0 || CoopNet_GetEnv("COOPNET_TOMAP") != "1") return;
 	if (!CoopNet_SkipVoting()) return;
 	iCoopNetTestMapTicks++;
+	if (iCoopNetTestMapTicks == 80 && CurrentInterface == INTERFACE_CREATE_CHARACTER) Event("InterfaceBreak"); // a player closes it with Ok
 	if (iCoopNetTestMapTicks == 100 && !IsEntity(&worldMap))
 	{
 		if (!CheckAttribute(pchar, "Ship.Pos.x")) { pchar.Ship.Pos.x = 0.0; pchar.Ship.Pos.z = 0.0; }
@@ -309,6 +310,14 @@ void CoopNet_TestMap()
 	// the host sails about as a player would: sails up (W held 2 s), then a turn to the left (A held 1 s)
 	// every 10 s, so the client's avatar of it has a moving, turning ship to follow
 	int iT = iCoopNetTestMapTicks;
+	if (iT == 300)
+	{
+		// the host speeds the game up: the client follows
+		TimeScaleCounter = 4;
+		SetTimeScale(2.0);
+		CoopNet_SpeedChanged();
+		CoopNet_Log("test: host speeds the game up to x2");
+	}
 	if (iT == 600)
 	{
 		CoopNet_TestKey(87, 1);

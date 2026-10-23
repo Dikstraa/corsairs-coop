@@ -280,7 +280,7 @@ void LAi_CharacterAttack()
 	//Начисление повреждений
 	float fCoopHp = CoopNet_LandHitBefore(enemy); // CoopNet: a hit on another player's puppet goes to that player
 	LAi_ApplyCharacterAttackDamage(attack, enemy, attackType, isBlocked, blockSave);
-	CoopNet_LandHitAfter(attack, enemy, fCoopHp);
+	CoopNet_LandHitAfter(attack, enemy, fCoopHp, attackType);
 	//Обновим цель сразу
 	LAi_group_UpdateTargets(enemy);
 	string func = enemy.chr_ai.type;

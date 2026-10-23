@@ -236,7 +236,8 @@ People: the stock characters (index below `GlobalCharacters`: merchants, governo
 same in every game and stay local. Everybody else in a location (citizens, soldiers, bandits,
 monsters, quest people) was made by the game that loaded it, so the player who has been there
 longest owns the location (each report says how long; the lower id wins a tie). The owner sends
-its people (`LAi_loginedcharacters`) twice a second, 12 per message; the others see them as
+its people (`LAi_loginedcharacters`) twice a second, 6 per message (an unreliable message must fit
+one UDP packet, ~1190 bytes; a bigger one is dropped); the others see them as
 puppets `CoopLand_<owner>_<idx>` that walk, draw blades and die with them (`LAi_KillCharacter`, a
 scripted death: nobody gets the kill). A player who is not the owner hides its own made-up people
 (`location = "none"`, the old address kept in `coopLandHidden`) and gets them back when the owner
@@ -263,8 +264,16 @@ dealt it (`MSG_LAND_KILL`), whose game gives the kill to whichever of its own hi
 game itself does: skill experience (blade or pistol), kill statistics by the real type,
 `LAi_SetResultOfDeath` (reputation, hunters, the town's nation turning hostile).
 
+A hit carries who dealt it (the hero or which of its people) and the blow (`fast`, `force`,
+`round`, `break`, `gun`): where it lands, that one's puppet turns to the target and plays the swing
+(`attack_*`, `Shot`), and a person hit fights back against exactly that puppet. So a player's
+officers fight in another player's location too: they are sent as allies, the owner's bandits
+attack their puppets and the blows reach the real officers, while the real officers attack the
+foes' puppets and get the kills.
+
 `run_pair.ps1 -NewGame -TestLand`: both go to Bridgetown, the client 15 s after the host, so the
-host owns the town; one of the host's people strikes the client's puppet; the client runs 10 m and
+host owns the town; the client gets an officer for the test; one of the host's people strikes the
+client's puppet, later its officer's puppet; the officer strikes one of the host's people; the client runs 10 m and
 back, draws its blade and strikes one of the host's people 5 times; after 75 s the host goes to the
 tavern. Measured: 3 blows of 23-27 killed the host's beggar there, later blows were dropped; the
 host's guards then went for the client's puppet and their blows killed the client's hero. Measured: a running player puppet up to 3 m behind, a standing one 0.2 m; the

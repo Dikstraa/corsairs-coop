@@ -1,0 +1,13 @@
+# Whitelist: only the mod sources and game scripts are versioned.
+# Game binaries, RESOURCE (~23 GB), OptionalMods and installer stay local.
+/*
+!/.gitignore
+!/.gitattributes
+!/README.md
+!/start.ini
+!/Program/
+!/CoopMod/
+
+/CoopMod/build/
+*.coop_backup
+*.log

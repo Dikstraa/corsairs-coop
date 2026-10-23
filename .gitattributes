@@ -1,0 +1,2 @@
+# Game scripts are CP1251 with CRLF; never let git convert line endings or encoding.
+* -text

@@ -255,6 +255,14 @@ war (PvP). So the owner's bandits go for every player's puppet, everybody's offi
 foes, and our own hits on allies don't count. Players' puppets share the player group: a crime by
 one player turns the town on all of them.
 
+Every person (and player) comes with the real one's rank, nation, town (`City`), type
+(`GetCharType`) and health. A puppet is made with that rank (its skills, so how well it defends,
+follow the rank) and nation, and shows the real health (outside a hit; the reserve is only put in
+for the measurement). When a forwarded hit kills the real one, its owner tells the player who
+dealt it (`MSG_LAND_KILL`), whose game gives the kill to whichever of its own hit last, as the
+game itself does: skill experience (blade or pistol), kill statistics by the real type,
+`LAi_SetResultOfDeath` (reputation, hunters, the town's nation turning hostile).
+
 `run_pair.ps1 -NewGame -TestLand`: both go to Bridgetown, the client 15 s after the host, so the
 host owns the town; one of the host's people strikes the client's puppet; the client runs 10 m and
 back, draws its blade and strikes one of the host's people 5 times; after 75 s the host goes to the

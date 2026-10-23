@@ -29,9 +29,11 @@
 // for the other players' puppets and everybody's officers go for the foes. Hits by our own on allies
 // don't count.
 
-#define COOPNET_MSG_LAND		160		// int id, string location, float x, y, z, ay, vx, vz, int flags, string model, string ani, string sex, string name, float here, int nation
-#define COOPNET_MSG_LAND_PEOPLE	161		// int id, string location, int n, n x (int idx, string model, string ani, string sex, float x, y, z, ay, vx, vz, int flags, int side)
+#define COOPNET_MSG_LAND		160		// int id, string location, float x, y, z, ay, vx, vz, int flags, string model, string ani, string sex, string name, float here, int nation, extra
+#define COOPNET_MSG_LAND_PEOPLE	161		// int id, string location, int n, n x (int idx, string model, string ani, string sex, float x, y, z, ay, vx, vz, int flags, int side, extra)
+										// extra: int rank, int nation, string city, string type (GetCharType), float hp, float hpMax
 #define COOPNET_MSG_LAND_HIT	162		// int owner, int idx + 1 (0: the hero), float damage, int attacker (player)
+#define COOPNET_MSG_LAND_KILL	163		// int to (the player who finished it), int owner, int idx + 1
 #define COOPNET_LAND_FIGHT		1		// flags: the blade is out
 #define COOPNET_LAND_DEAD		2		// flags: dead (with the blade: 3)
 #define COOPNET_LAND_NEUTRAL	0		// sides
@@ -56,6 +58,7 @@ object CoopNetLandPeople;	// o<owner>_<idx>: owner, idx, loc, same fields as a p
 object CoopNetLandSeen;		// c<idx>: x, z, at - our people's last positions, for their speed
 object CoopNetLandFree;		// c<idx>: puppet characters to give back once their location is gone
 object CoopNetLandHidden;	// c<idx>: our people hidden while another player owns the location
+object CoopNetLandScratch;	// a message's extra fields while they are passed on
 int iCoopNetLandTicks = 0;
 int iCoopNetLandPeopleTicks = 0;
 float fCoopNetLandFromX = 0.0;	// our position at the last report, for our speed
@@ -156,6 +159,7 @@ void CoopNet_LandReport()
 	CoopNet_PutString(GetFullName(pchar));
 	CoopNet_PutFloat(fNow - fCoopNetLandArrivedAt);
 	CoopNet_PutInt(sti(pchar.nation));
+	CoopNet_LandPutExtra(pchar);
 	if (CoopNet_State() == COOPNET_HOSTING) CoopNet_Send(COOPNET_ALL, COOPNET_UNRELIABLE);
 	else CoopNet_Send(COOPNET_HOST_ID, COOPNET_UNRELIABLE);
 }
@@ -177,6 +181,7 @@ void CoopNet_OnLand(int iFrom)
 	string sName = CoopNet_GetString();
 	float fHere = CoopNet_GetFloat();
 	int iNation = CoopNet_GetInt();
+	CoopNet_LandGetExtra(&CoopNetLandScratch);
 	if (iId == CoopNet_MyId()) return;
 	if (CoopNet_State() == COOPNET_HOSTING)
 	{
@@ -197,6 +202,7 @@ void CoopNet_OnLand(int iFrom)
 		CoopNet_PutString(sName);
 		CoopNet_PutFloat(fHere);
 		CoopNet_PutInt(iNation);
+		CoopNet_LandPutExtraFrom(&CoopNetLandScratch);
 		CoopNet_Send(COOPNET_ALL, COOPNET_UNRELIABLE);
 	}
 	string sKey = "p" + iId;
@@ -215,6 +221,7 @@ void CoopNet_OnLand(int iFrom)
 	aref arP;
 	makearef(arP, CoopNetLand.(sKey));
 	CoopNet_LandStore(arP, fX, fY, fZ, fAY, fVX, fVZ, iFlags, sModel, sAni, sSex);
+	CoopNet_LandCopyExtra(arP, &CoopNetLandScratch);
 }
 
 void CoopNet_LandStore(aref arE, float fX, float fY, float fZ, float fAY, float fVX, float fVZ, int iFlags, string sModel, string sAni, string sSex)
@@ -371,6 +378,7 @@ void CoopNet_LandSendPeople(string sHere)
 				if (LAi_group_IsEnemy(rChr, pchar)) iSide = COOPNET_LAND_FOE;
 			}
 			CoopNet_PutInt(iSide);
+			CoopNet_LandPutExtra(rChr);
 		}
 		if (CoopNet_State() == COOPNET_HOSTING) CoopNet_Send(COOPNET_ALL, COOPNET_UNRELIABLE);
 		else CoopNet_Send(COOPNET_HOST_ID, COOPNET_UNRELIABLE);
@@ -474,6 +482,7 @@ void CoopNet_OnLandPeople(int iFrom)
 		float fVZ = CoopNet_GetFloat();
 		int iFlags = CoopNet_GetInt();
 		int iSide = CoopNet_GetInt();
+		CoopNet_LandGetExtra(&CoopNetLandScratch);
 		if (bRelay)
 		{
 			CoopNet_PutInt(iIdx);
@@ -488,6 +497,7 @@ void CoopNet_OnLandPeople(int iFrom)
 			CoopNet_PutFloat(fVZ);
 			CoopNet_PutInt(iFlags);
 			CoopNet_PutInt(iSide);
+			CoopNet_LandPutExtraFrom(&CoopNetLandScratch);
 		}
 		if (!bKeep) continue;
 		string sKey = "o" + iId + "_" + iIdx;
@@ -498,6 +508,7 @@ void CoopNet_OnLandPeople(int iFrom)
 		aref arE;
 		makearef(arE, CoopNetLandPeople.(sKey));
 		CoopNet_LandStore(arE, fX, fY, fZ, fAY, fVX, fVZ, iFlags, sModel, sAni, sSex);
+		CoopNet_LandCopyExtra(arE, &CoopNetLandScratch);
 	}
 	if (bRelay) CoopNet_Send(COOPNET_ALL, COOPNET_UNRELIABLE);
 }
@@ -554,7 +565,9 @@ void CoopNet_LandKeepPuppet(aref arP, string sId, string sName, int iOwner, int 
 
 bool CoopNet_LandCreatePuppet(aref arP, string sId, string sName, int iOwner, int iIdx)
 {
-	int iChr = NPC_GenerateCharacter(sId, arP.model, arP.sex, arP.ani, 1, PIRATE, -1, false);
+	// the real one's rank (skills by rank: how well it defends) and nation, its town (what killing it
+	// costs) and type (the kill statistics)
+	int iChr = NPC_GenerateCharacter(sId, arP.model, arP.sex, arP.ani, sti(arP.rank), sti(arP.nation), -1, false);
 	if (iChr < 0)
 	{
 		CoopNet_Log("land: no free character for " + sId);
@@ -565,6 +578,9 @@ bool CoopNet_LandCreatePuppet(aref arP, string sId, string sName, int iOwner, in
 	DeleteAttribute(&CoopNetLandFree, sC);
 	rChr.name = sName;
 	rChr.lastname = "";
+	DeleteAttribute(rChr, "City");
+	if (arP.city != "") rChr.City = arP.city;
+	rChr.coopType = arP.ctype;
 	rChr.coopLand = sId;
 	rChr.coopOwner = iOwner;	// whose game has the real one, and its index there (-1: the hero)
 	rChr.coopIdx = iIdx;
@@ -579,7 +595,7 @@ bool CoopNet_LandCreatePuppet(aref arP, string sId, string sName, int iOwner, in
 	ChangeCharacterAddressGroup(rChr, pchar.location, sGroup, sLocator);
 	LAi_SetActorType(rChr);
 	LAi_SetImmortal(rChr, true);
-	LAi_SetHP(rChr, COOPNET_LAND_RESERVE, COOPNET_LAND_RESERVE);
+	CoopNet_LandShowHealth(arP, rChr);
 	UnsetSpecialAttributes(rChr); // the fight code reads chr_ai.special, made when a blade is equipped
 	LAi_CharacterDisableDialog(rChr);
 	TeleportCharacterToPosAy(rChr, stf(arP.x), stf(arP.y), stf(arP.z), stf(arP.ay));
@@ -663,6 +679,7 @@ void CoopNet_LandSteer(aref arP)
 		return;
 	}
 	if (sti(arP.side) != sti(arP.chrSide)) CoopNet_LandSetSide(arP, rChr);
+	CoopNet_LandShowHealth(arP, rChr);
 	bool bFight = iFlags == COOPNET_LAND_FIGHT;
 	if (bFight != sti(arP.fight))
 	{
@@ -756,6 +773,120 @@ void CoopNet_LandLog()
 	CoopNet_Log("land: me in " + CoopNet_LandHere() + ", owner " + bCoopNetLandOwner + ", " + GetAttributesNum(arHidden) + " of ours aside, " + iShown + " of theirs shown (" + iDead + " dead, worst " + fWorst + " off)" + sLine);
 }
 
+// ---- extra fields: what a puppet needs to fight like the real one --------------------------------
+
+void CoopNet_LandPutExtra(ref rChr)
+{
+	int iRank = 1;
+	if (CheckAttribute(rChr, "rank")) iRank = sti(rChr.rank);
+	string sCity = "";
+	if (CheckAttribute(rChr, "City")) sCity = rChr.City;
+	CoopNet_PutInt(iRank);
+	CoopNet_PutInt(sti(rChr.nation));
+	CoopNet_PutString(sCity);
+	CoopNet_PutString(GetCharType(rChr));
+	CoopNet_PutFloat(LAi_GetCharacterHP(rChr));
+	CoopNet_PutFloat(LAi_GetCharacterMaxHP(rChr));
+}
+
+void CoopNet_LandGetExtra(aref arTo)
+{
+	arTo.rank = CoopNet_GetInt();
+	arTo.nation = CoopNet_GetInt();
+	arTo.city = CoopNet_GetString();
+	arTo.ctype = CoopNet_GetString();
+	arTo.hp = CoopNet_GetFloat();
+	arTo.hpMax = CoopNet_GetFloat();
+}
+
+void CoopNet_LandPutExtraFrom(aref arFrom)
+{
+	CoopNet_PutInt(sti(arFrom.rank));
+	CoopNet_PutInt(sti(arFrom.nation));
+	CoopNet_PutString(arFrom.city);
+	CoopNet_PutString(arFrom.ctype);
+	CoopNet_PutFloat(stf(arFrom.hp));
+	CoopNet_PutFloat(stf(arFrom.hpMax));
+}
+
+void CoopNet_LandCopyExtra(aref arTo, aref arFrom)
+{
+	arTo.rank = arFrom.rank;
+	arTo.nation = arFrom.nation;
+	arTo.city = arFrom.city;
+	arTo.ctype = arFrom.ctype;
+	arTo.hp = arFrom.hp;
+	arTo.hpMax = arFrom.hpMax;
+}
+
+// ---- kills ----------------------------------------------------------------------------------------
+
+// The owner says our hit finished one of its people: we get the kill, as if it were ours.
+void CoopNet_OnLandKill(int iFrom)
+{
+	int iTo = CoopNet_GetInt();
+	int iOwner = CoopNet_GetInt();
+	int iIdx = CoopNet_GetInt() - 1;
+	if (iTo != CoopNet_MyId())
+	{
+		if (CoopNet_State() != COOPNET_HOSTING) return;
+		CoopNet_Begin(COOPNET_MSG_LAND_KILL);
+		CoopNet_PutInt(iTo);
+		CoopNet_PutInt(iOwner);
+		CoopNet_PutInt(iIdx + 1);
+		CoopNet_Send(iTo, COOPNET_RELIABLE);
+		return;
+	}
+	string sKey = "o" + iOwner + "_" + iIdx;
+	if (!CheckAttribute(&CoopNetLandPeople, sKey + ".chr")) return;
+	ref rDead;
+	makeref(rDead, Characters[sti(CoopNetLandPeople.(sKey).chr)]);
+	int iBy = nMainCharacterIndex;
+	if (CheckAttribute(rDead, "coopLastBy")) iBy = sti(rDead.coopLastBy);
+	bool bGun = false;
+	if (CheckAttribute(rDead, "coopLastGun")) bGun = sti(rDead.coopLastGun);
+	ref rBy;
+	makeref(rBy, Characters[iBy]);
+	CoopNet_LandKillReward(rBy, rDead, bGun);
+	CoopNet_Log("land: " + rBy.id + " gets the kill of " + rDead.id + " (" + rDead.coopType + ", gun " + bGun + ")");
+}
+
+// What LAi_ApplyCharacterAttackDamage / LAi_ApplyCharacterFireDamage give for a kill.
+void CoopNet_LandKillReward(ref attack, ref enemy, bool bGun)
+{
+	float ra = 1.0;
+	float re = 1.0;
+	if (CheckAttribute(attack, "rank")) ra = stf(attack.rank);
+	if (CheckAttribute(enemy, "rank")) re = stf(enemy.rank);
+	int experience = 0;
+	if (bGun)
+	{
+		if (re < 4) experience = GetCharacterSPECIALSimple(attack, SPECIAL_P) + rand(GetCharacterSPECIALSimple(attack, SPECIAL_I));
+		else experience = LAi_GetCharacterMaxHP(enemy) / re + GetCharacterSPECIALSimple(attack, SPECIAL_P) * re / ra;
+		AddCharacterExpToSkill(attack, SKILL_PISTOL, experience);
+		AddCharacterExpToSkill(attack, SKILL_DEFENCE, 1);
+		AddCharacterExpToSkill(attack, SKILL_FORTUNE, 2);
+		AddCharacterExpToSkill(attack, SKILL_LEADERSHIP, 1);
+	}
+	else
+	{
+		if (re < 4) experience = GetCharacterSPECIALSimple(attack, SPECIAL_I) + rand(GetCharacterSPECIALSimple(attack, SPECIAL_A));
+		else experience = LAi_GetCharacterMaxHP(enemy) / re + GetCharacterSPECIALSimple(attack, SPECIAL_I) * re / ra;
+		AddCharacterExpToSkill(attack, LAi_GetBladeFencingType(attack), experience);
+		AddCharacterExpToSkill(attack, SKILL_DEFENCE, 1);
+		AddCharacterExpToSkill(attack, SKILL_FORTUNE, 1);
+		AddCharacterExpToSkill(attack, SKILL_LEADERSHIP, 1);
+	}
+	// the statistics by the real one's type (a puppet is an actor, which counts as a citizen)
+	if (sti(attack.index) == GetMainCharacterIndex())
+	{
+		string sStat = enemy.coopType + "_s";
+		if (bGun) sStat = enemy.coopType + "_g";
+		Statistic_AddValue(attack, sStat, 1);
+	}
+	LAi_SetResultOfDeath(attack, enemy, true);
+}
+
 // ---- fights ---------------------------------------------------------------------------------
 
 // A puppet's group follows its side: foes are hostile to our hero's group, allies are in it.
@@ -779,22 +910,63 @@ void CoopNet_LandSetSide(aref arP, ref rChr)
 	LAi_group_MoveCharacter(rChr, sGroup);
 }
 
+// A puppet shows the real one's health (and stays alive: it is immortal outside a hit).
+void CoopNet_LandShowHealth(aref arP, ref rChr)
+{
+	float fMax = stf(arP.hpMax);
+	if (fMax < 1.0) fMax = 1.0;
+	float fHp = stf(arP.hp);
+	if (fHp < 1.0) fHp = 1.0;
+	if (CheckAttribute(rChr, "coopHitAt") && CheckAttribute(rChr, "coopHp"))
+	{
+		// the owner's word may still be from before our last hit
+		if (CoopNet_Seconds() - stf(rChr.coopHitAt) < 1.0 && stf(rChr.coopHp) < fHp) fHp = stf(rChr.coopHp);
+	}
+	rChr.coopHp = fHp;
+	rChr.coopHpMax = fMax;
+	rChr.chr_ai.hp_max = fMax;
+	rChr.chr_ai.hp = fHp;
+}
+
 // From LAi_CharacterAttack and LAi_CharacterFire (LAi_events.c) around the damage: -1 when chr is
-// no puppet, else its full health, from which the hit is measured.
+// no puppet, else the reserve it gets for the hit, from which the hit is measured.
 float CoopNet_LandHitBefore(aref chr)
 {
 	if (!CheckAttribute(chr, "coopOwner")) return -1.0;
 	chr.chr_ai.immortal = "0"; // immortals take no hits at all; the reserve keeps it alive
-	chr.chr_ai.hp = chr.chr_ai.hp_max;
-	return stf(chr.chr_ai.hp);
+	chr.chr_ai.hp_max = COOPNET_LAND_RESERVE;
+	chr.chr_ai.hp = COOPNET_LAND_RESERVE;
+	return COOPNET_LAND_RESERVE;
 }
 
 void CoopNet_LandHitAfter(aref attack, aref chr, float fBefore)
 {
+	CoopNet_LandHitDone(attack, chr, fBefore, false);
+}
+
+void CoopNet_LandHitAfterGun(aref attack, aref chr, float fBefore)
+{
+	CoopNet_LandHitDone(attack, chr, fBefore, true);
+}
+
+void CoopNet_LandHitDone(aref attack, aref chr, float fBefore, bool bGun)
+{
 	if (fBefore < 0.0) return;
 	float fDamage = fBefore - stf(chr.chr_ai.hp);
-	chr.chr_ai.hp = chr.chr_ai.hp_max;
+	// back to what the real one has, less this hit until the owner's next word
+	float fHp = stf(chr.coopHp) - fDamage;
+	if (fHp < 1.0) fHp = 1.0;
+	chr.coopHp = fHp;
+	chr.coopHitAt = CoopNet_Seconds();
+	chr.chr_ai.hp_max = chr.coopHpMax;
+	chr.chr_ai.hp = fHp;
 	chr.chr_ai.immortal = "1";
+	if (!CheckAttribute(attack, "coopOwner"))
+	{
+		// who of ours hit it last, and with what: the one who gets the kill
+		chr.coopLastBy = attack.index;
+		chr.coopLastGun = bGun;
+	}
 	DeleteAttribute(chr, "chr_ai.Blooding");
 	DeleteAttribute(chr, "chr_ai.poison");
 	if (sti(chr.coopSide) == COOPNET_LAND_NEUTRAL)
@@ -874,7 +1046,17 @@ void CoopNet_OnLandHit(int iFrom)
 	LAi_CheckKillCharacter(rTarget);
 	bool bDead = LAi_IsDead(rTarget);
 	CoopNet_Log("land: " + rTarget.id + " hit by player " + iAttacker + " for " + fDamage + ", hp " + rTarget.chr_ai.hp + ", dead " + bDead);
-	if (bDead) return;
+	if (bDead)
+	{
+		// the player who finished it gets the kill
+		CoopNet_Begin(COOPNET_MSG_LAND_KILL);
+		CoopNet_PutInt(iAttacker);
+		CoopNet_PutInt(CoopNet_MyId());
+		CoopNet_PutInt(iIdx + 1);
+		if (CoopNet_State() == COOPNET_HOSTING) CoopNet_Send(iAttacker, COOPNET_RELIABLE);
+		else CoopNet_Send(COOPNET_HOST_ID, COOPNET_RELIABLE);
+		return;
+	}
 	// it fights back: against the attacker's puppet here, if there is one
 	string sKey = "p" + iAttacker;
 	if (!CheckAttribute(&CoopNetLand, sKey + ".chr")) return;
@@ -904,6 +1086,11 @@ bool CoopNet_LandDispatch(int iType, int iFrom)
 	if (iType == COOPNET_MSG_LAND_HIT)
 	{
 		CoopNet_OnLandHit(iFrom);
+		return true;
+	}
+	if (iType == COOPNET_MSG_LAND_KILL)
+	{
+		CoopNet_OnLandKill(iFrom);
 		return true;
 	}
 	return false;
@@ -990,7 +1177,7 @@ void CoopNet_TestLandStrike()
 		if (!CheckAttribute(arE, "chr") || sti(arE.dead)) continue;
 		ref rOn;
 		makeref(rOn, Characters[sti(arE.chr)]);
-		CoopNet_Log("test: land strike at " + rOn.id + " (" + arE.owner + "/" + arE.idx + ")");
+		CoopNet_Log("test: land strike at " + rOn.id + " (" + arE.owner + "/" + arE.idx + "), rank " + rOn.rank + ", hp " + rOn.chr_ai.hp + "/" + rOn.chr_ai.hp_max + ", type " + rOn.coopType);
 		CoopNet_TestLandBlow(pchar, rOn);
 		return;
 	}

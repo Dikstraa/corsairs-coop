@@ -363,7 +363,7 @@ void LAi_CharacterFire()
 			{
 				float fCoopHpMulti = CoopNet_LandHitBefore(&Characters[idx]); // CoopNet
 				LAi_ApplyCharacterFireDamage(attack, &Characters[idx], kDist );
-				CoopNet_LandHitAfter(attack, &Characters[idx], fCoopHpMulti);
+				CoopNet_LandHitAfterGun(attack, &Characters[idx], fCoopHpMulti);
 				// Log_Info(Characters[idx].name);
 			}	
 			
@@ -398,7 +398,7 @@ void LAi_CharacterFire()
 	//Начисление повреждений
 	float fCoopHpFire = CoopNet_LandHitBefore(enemy); // CoopNet
 	LAi_ApplyCharacterFireDamage(attack, enemy, kDist);	
-	CoopNet_LandHitAfter(attack, enemy, fCoopHpFire);
+	CoopNet_LandHitAfterGun(attack, enemy, fCoopHpFire);
 	if(CheckAttribute(attack, "chr_ai.multidmg") && sti(attack.chr_ai.multidmg) > 0)
 	{
 		if(stf(enemy.chr_ai.hp) < 1.0 && enemy.chr_ai.group == LAI_GROUP_PLAYER) enemy.chr_ai.hp = 5;

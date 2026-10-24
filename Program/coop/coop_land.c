@@ -79,6 +79,7 @@ float fCoopNetLandLogAt = 0.0;
 int iCoopNetLandList[64];			// characters picked from LAi_loginedcharacters
 int iCoopNetLandListNum = 0;
 int iCoopNetLandJumps = 0;			// puppets put in place since the last log line (each one a visible jump)
+bool bCoopNetLandTalking = false;	// our hero was in a dialog at the last report (for the log)
 
 void CoopNet_LandTick()
 {
@@ -145,6 +146,7 @@ void CoopNet_LandReport()
 	sCoopNetLandFromLoc = sLoc;
 	int iFlags = 0;
 	if (SendMessage(pchar, "ls", MSG_CHARACTER_EX_MSG, "IsFightMode") != 0) iFlags = COOPNET_LAND_FIGHT;
+	if (dialogRun != bCoopNetLandTalking) CoopNet_LandLogTalk(iFlags);
 	string sAni = "man";
 	if (CheckAttribute(pchar, "model.animation")) sAni = pchar.model.animation;
 	string sSex = "man";
@@ -169,6 +171,28 @@ void CoopNet_LandReport()
 	CoopNet_LandPutExtra(pchar);
 	if (CoopNet_State() == COOPNET_HOSTING) CoopNet_Send(COOPNET_ALL, COOPNET_UNRELIABLE);
 	else CoopNet_Send(COOPNET_HOST_ID, COOPNET_UNRELIABLE);
+}
+
+// For the log: who our hero talks to (a talk looked like a fight in another player's game).
+void CoopNet_LandLogTalk(int iFlags)
+{
+	bCoopNetLandTalking = dialogRun;
+	if (!dialogRun)
+	{
+		CoopNet_Log("land: talk over, blade " + iFlags);
+		return;
+	}
+	string sWho = "?";
+	if (CheckAttribute(CharacterRef, "index"))
+	{
+		int iIdx = sti(CharacterRef.index);
+		string sKind = "made up";
+		if (iIdx < GlobalCharacters) sKind = "stock";
+		if (CheckAttribute(CharacterRef, "coopLand")) sKind = "puppet";
+		if (CheckAttribute(CharacterRef, "coopLandHidden")) sKind = "hidden";
+		sWho = CharacterRef.id + " (" + iIdx + ", " + sKind + ", group " + CharacterRef.chr_ai.group + ", type " + CharacterRef.chr_ai.type + ", blade " + SendMessage(CharacterRef, "ls", MSG_CHARACTER_EX_MSG, "IsFightMode") + ")";
+	}
+	CoopNet_Log("land: we talk to " + sWho + ", our blade " + iFlags);
 }
 
 void CoopNet_OnLand(int iFrom)
@@ -707,6 +731,7 @@ void CoopNet_LandSteer(aref arP)
 	{
 		arP.fight = bFight;
 		LAi_SetFightMode(rChr, bFight);
+		CoopNet_Log("land: " + rChr.id + " (" + GetFullName(rChr) + ") blade " + bFight + ", side " + arP.side + ", group " + rChr.chr_ai.group);
 	}
 
 	float fAge = CoopNet_Seconds() - stf(arP.at);
@@ -1472,6 +1497,7 @@ void CoopNet_TestSleep()
 // COOPNET_TALKTEST=1 (with the land test, no fights): the host talks to the citizen nearest to it;
 // the client logs every second what the host's puppet and the people around it do.
 int iCoopNetTalkTestTicks = 0;
+int iCoopNetTalkTestNpc = -1;
 
 void CoopNet_TestTalk()
 {
@@ -1518,6 +1544,15 @@ void CoopNet_TestTalk()
 			CoopNet_Log("test: talk - host talks to " + rNpc.id + " (index " + iBest + "), " + fBest + " m away");
 			LAi_SetActorType(rNpc);
 			LAi_ActorDialog(rNpc, pchar, "", 10.0, 0);
+			iCoopNetTalkTestNpc = iBest;
+		}
+		// the walk up to us may not start a dialog in a window that is not active: start it ourselves
+		if (iCoopNetTalkTestTicks == 850 && !dialogRun && iCoopNetTalkTestNpc >= 0)
+		{
+			LAi_SetCitizenType(&Characters[iCoopNetTalkTestNpc]); // an actor won't talk
+			LAi_SetPlayerType(pchar);
+			LAi_CharacterEnableDialog(pchar);
+			CoopNet_Log("test: talk - dialog started " + DialogMain(&Characters[iCoopNetTalkTestNpc]) + ", can " + LAi_Character_CanDialog(pchar, &Characters[iCoopNetTalkTestNpc]) + " " + LAi_Character_CanDialog(&Characters[iCoopNetTalkTestNpc], pchar) + ", disabled " + dialogDisable + ", hero " + pchar.chr_ai.type + "/" + pchar.chr_ai.tmpl + " dlg " + CheckAttribute(pchar, "chr_ai.disableDlg") + ", npc dlg " + CheckAttribute(&Characters[iCoopNetTalkTestNpc], "chr_ai.disableDlg"));
 		}
 		if (iCoopNetTalkTestTicks == 900 || iCoopNetTalkTestTicks == 1300)
 		{

@@ -124,7 +124,10 @@ void CoopNet_HeroAutoStart()
 void CoopNet_HeroSkipCreation()
 {
 	if (!bCoopNetHeroReturning) return;
-	if (CurrentInterface == INTERFACE_CREATE_CHARACTER) Event("InterfaceBreak");
+	if (CurrentInterface != INTERFACE_CREATE_CHARACTER) return;
+	Event("InterfaceBreak");
+	bDisableCharacterMenu = false; // locked by the selection cabin (see CoopNet_HeroApply)
+	bDisableQuestInterface = false;
 }
 
 // From the world sync: the host's world is here. A returning player asks for its hero now; a new
@@ -225,7 +228,7 @@ void CoopNet_HeroUpload()
 	aref arPack;
 	makearef(arPack, CoopNetHeroPack);
 	int iSent = CoopNet_TreeSend(arPack, COOPNET_TREE_UPLOAD, CoopNet_HeroUid(), COOPNET_HOST_ID);
-	CoopNet_Log("hero: sent our hero to the host, " + iSent + " entries");
+	CoopNet_Log("hero: sent our hero to the host, " + iSent + " entries, hero menu locked " + bDisableCharacterMenu);
 }
 
 void CoopNet_HeroPack()
@@ -361,6 +364,11 @@ void CoopNet_HeroApply(aref arPack)
 	CoopNet_HeroRemap(pchar);
 	CoopNet_Log("hero: our hero is back, " + iNum + " people, " + GetAttributesNum(arShips) + " ships");
 	CoopNet_Notice("Кооператив: ваш герой загружен");
+	// the hero selection cabin of the new game locked the hero menu (F2) and the journal till its end
+	// (EndSelectMainCharacter), which a returning hero never reaches
+	bDisableCharacterMenu = false;
+	bDisableQuestInterface = false;
+	CoopNet_Log("hero: menus unlocked, interface " + InterfaceStates.Launched + " " + CurrentInterface);
 	CoopNet_HeroInPlace();
 	CoopNet_HeroGoBack(arPack);
 }

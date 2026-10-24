@@ -326,6 +326,15 @@ host's guards then went for the client's puppet and their blows killed the clien
 client hid 33-40 of its townsfolk and showed the host's 35-36, walking up to ~5 m behind (under
 the 6 m jump); its own came back half a second after the host left.
 
+## Giving money and items
+
+`coop_give.c`: on land, within 4 m of another player, **F4** (bound only in the debug mode
+otherwise) opens the game's chest window over an empty box (`LaunchItemsBox`). Whatever is put in it
+(money as gold) goes to that player when the window closes (`MSG_GIVE`, reliable, through the host),
+whose game adds it to the hero (`AddMoneyToCharacter`, `TakeNItems`); when that player is gone by then,
+it all comes back. `run_pair.ps1 -NewGame -TestLand -TestGive`: the client gives the host 1234 and 2
+potions: client 5000 -> 3766 money, 3 -> 1 potions, the host got both.
+
 ## Script API
 
 ```c
@@ -374,6 +383,9 @@ load); in a session the shared clock simply overrides it.
 
 Test without clicking through menus: `run_pair.ps1 -NewGame` starts both instances into a new game;
 `-TestSkip` also makes the host sleep 8 hours and the client agree.
+Sleeping in a tavern room (`TavernWaitDate`, scripts/tavern.c) goes through `WaitDate` too: `-TestLand
+-TestSleep` has the client sleep in Bridgetown and the host agree; both clocks went from day 1 11:15
+to day 2 7:27 together.
 
 ## Engine and script quirks
 

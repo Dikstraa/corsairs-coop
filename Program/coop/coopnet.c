@@ -649,6 +649,7 @@ void CoopNet_Tick()
 	CoopNet_LandTick();
 	CoopNet_HeroTick();
 	CoopNet_RulesTick();
+	CoopNet_GiveTick();
 	CoopNet_LogClock();
 	CoopNet_LogStatus();
 	CoopNet_TestNewGame();
@@ -659,6 +660,8 @@ void CoopNet_Tick()
 	CoopNet_TestHero();
 	CoopNet_TestRules();
 	CoopNet_TestLand();
+	CoopNet_TestGive();
+	CoopNet_TestSleep();
 	int iType = CoopNet_Recv();
 	while (iType != 0)
 	{
@@ -697,6 +700,7 @@ void CoopNet_OnGameStarted()
 	CoopNet_WorldGameStarted();
 	CI_CreateAndSetControls("", "CoopVoteYes", CI_GetKeyCode("VK_F8"), 0, false);
 	CI_CreateAndSetControls("", "CoopJoinSea", CI_GetKeyCode("VK_F9"), 0, false);
+	CI_CreateAndSetControls("", "CoopGive", CI_GetKeyCode("VK_F4"), 0, false); // free outside the debug mode
 }
 
 #event_handler("Control Activation", "CoopNet_OnControl");
@@ -705,6 +709,7 @@ void CoopNet_OnControl()
 	string sControl = GetEventData();
 	if (sControl == "CoopVoteYes") CoopNet_VoteYes();
 	if (sControl == "CoopJoinSea") CoopNet_SeaJoinOffered();
+	if (sControl == "CoopGive") CoopNet_GiveOffered();
 }
 
 // ---- time skips ----------------------------------------------------------------
@@ -853,6 +858,7 @@ void CoopNet_Dispatch(int iType)
 	if (CoopNet_HeroDispatch(iType, iFrom)) return;
 	if (CoopNet_RulesDispatch(iType, iFrom)) return;
 	if (CoopNet_LandDispatch(iType, iFrom)) return;
+	if (CoopNet_GiveDispatch(iType, iFrom)) return;
 	if (iType == COOPNET_MSG_SEA)
 	{
 		CoopNet_OnSea(iFrom);
@@ -1003,3 +1009,5 @@ void CoopNet_Dispatch(int iType)
 #include "coop\coop_heroes.c"
 #include "coop\coop_rules.c"
 #include "coop\coop_land.c"
+
+#include "coop\coop_give.c"

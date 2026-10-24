@@ -1403,3 +1403,25 @@ void CoopNet_TestLandStrikeOfficer()
 	}
 	CoopNet_Log("test: no officer puppet of the client here");
 }
+
+// COOPNET_SLEEPTEST=1 (with the land test): the client sleeps in Bridgetown as in a tavern room; the
+// host (COOPNET_AUTOVOTE) agrees, and both log their clocks before and after.
+int iCoopNetSleepTestTicks = 0;
+
+void CoopNet_TestSleep()
+{
+	if (iCoopNetSleepTestTicks < 0 || CoopNet_GetEnv("COOPNET_SLEEPTEST") != "1") return;
+	if (CoopNet_LandHere() != "Bridgetown_town") return;
+	iCoopNetSleepTestTicks++;
+	bool bClient = CoopNet_GetEnv("COOPNET_TEST") == "client";
+	if (iCoopNetSleepTestTicks == 300 || iCoopNetSleepTestTicks == 1100)
+	{
+		CoopNet_Log("test: sleep - day " + GetDataDay() + " time " + GetTime());
+	}
+	if (iCoopNetSleepTestTicks == 320 && bClient)
+	{
+		CoopNet_Log("test: sleep - client sleeps till morning");
+		TavernWaitDate("wait_day");
+	}
+	if (iCoopNetSleepTestTicks == 1100) iCoopNetSleepTestTicks = -1;
+}

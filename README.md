@@ -326,6 +326,23 @@ host's guards then went for the client's puppet and their blows killed the clien
 client hid 33-40 of its townsfolk and showed the host's 35-36, walking up to ~5 m behind (under
 the 6 m jump); its own came back half a second after the host left.
 
+## Quests: each player's own, consequences shared
+
+Every player keeps its own quests and journal. What is shared:
+
+- The world (stores, colony owners, relations between nations), as above.
+- Deaths of the stock characters (`coop_story.c`): governors, merchants, tavern keepers, the
+  story's people (index below `GlobalCharacters`) are the same in every game. One killed in a game
+  (`LAi_Character_Dead_Process` calls `CoopNet_StoryDeath`) is dead in everybody's: killed there
+  (a scripted death) for a player in the same location, otherwise marked dead (`chr_ai.hp` 0,
+  location "none"). The host keeps the list (`CoopNetDeadNpcs`, a saved global) and sends it with the
+  world to players joining later. `run_pair.ps1 -NewGame -TestLand -TestStory`: the host kills the
+  tavern waitress, the client (in the town) has her marked dead at once.
+- Quest fights: a player's quest people are never hidden in another player's location
+  (`CoopNet_LandIsMadeUp`: only citizens, soldiers, carriers and location fantoms step aside), so
+  they stand where its quest put them, the others see them as puppets and can help; the kill goes
+  to whoever finished it, and the quest (a group check in its owner's game) goes on for its player.
+
 ## Giving money and items
 
 `coop_give.c`: on land, within 4 m of another player, **F4** (bound only in the debug mode

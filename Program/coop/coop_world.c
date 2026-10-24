@@ -166,6 +166,7 @@ void CoopNet_WorldSendAll(int iTo)
 	}
 	CoopNet_WorldSendRelations(iTo);
 	CoopNet_EncSendAll(iTo);
+	CoopNet_StorySendAll(iTo);
 	CoopNet_Begin(COOPNET_MSG_WORLD_DONE);
 	CoopNet_Send(iTo, COOPNET_RELIABLE);
 	CoopNet_Log("world: sent " + iSent + " entries to player " + iTo);

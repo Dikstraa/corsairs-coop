@@ -502,6 +502,7 @@ void LAi_Character_EndAction()
 
 void LAi_Character_Dead_Process(aref chr)
 {
+	CoopNet_StoryDeath(chr); // coop: a stock character's death is shared
 	DialogExit();
 	LAi_CharacterLogoff(chr);
 	if(sti(chr.index) != nMainCharacterIndex)

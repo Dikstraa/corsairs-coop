@@ -662,6 +662,7 @@ void CoopNet_Tick()
 	CoopNet_TestLand();
 	CoopNet_TestGive();
 	CoopNet_TestSleep();
+	CoopNet_TestStory();
 	int iType = CoopNet_Recv();
 	while (iType != 0)
 	{
@@ -859,6 +860,7 @@ void CoopNet_Dispatch(int iType)
 	if (CoopNet_RulesDispatch(iType, iFrom)) return;
 	if (CoopNet_LandDispatch(iType, iFrom)) return;
 	if (CoopNet_GiveDispatch(iType, iFrom)) return;
+	if (CoopNet_StoryDispatch(iType, iFrom)) return;
 	if (iType == COOPNET_MSG_SEA)
 	{
 		CoopNet_OnSea(iFrom);
@@ -1009,5 +1011,5 @@ void CoopNet_Dispatch(int iType)
 #include "coop\coop_heroes.c"
 #include "coop\coop_rules.c"
 #include "coop\coop_land.c"
-
 #include "coop\coop_give.c"
+#include "coop\coop_story.c"

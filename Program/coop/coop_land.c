@@ -16,7 +16,8 @@
 // there longest "owns" the location: its people are the real ones. It sends them twice a second
 // and everybody else there sees them as puppets too (walking, blade, death); their own made-up people
 // are hidden (location "none") while they are not the owner and come back when they leave or become
-// the owner. Officers are never hidden: every player sends its own, so everybody sees everybody's.
+// the owner. Officers and the people of a player's own quests are never hidden: every player sends
+// its own, so everybody sees everybody's, and a quest fight works for its player wherever it is.
 // Puppets are sent away when their player leaves or this player does, so the game never logs them
 // in again when it loads that location.
 //
@@ -297,7 +298,7 @@ void CoopNet_LandOwnership(string sHere)
 // ---- our people -------------------------------------------------------------------------------
 
 // Our people in this location worth sending: everybody made by this game (all of them as the
-// owner, only the officers otherwise), not the stock characters, not the hero, not puppets.
+// owner, only the officers and its quest people otherwise), not the stock characters, not the hero, not puppets.
 void CoopNet_LandPickPeople(bool bAll)
 {
 	iCoopNetLandListNum = 0;
@@ -307,11 +308,23 @@ void CoopNet_LandPickPeople(bool bAll)
 		if (iIdx < GlobalCharacters || iIdx == nMainCharacterIndex) continue;
 		ref rChr = &Characters[iIdx];
 		if (CheckAttribute(rChr, "coopLand") || CheckAttribute(rChr, "coopLandHidden")) continue;
-		if (!bAll && !CoopNet_LandIsOfficer(rChr)) continue;
+		if (!bAll && !CoopNet_LandIsOfficer(rChr) && CoopNet_LandIsMadeUp(rChr)) continue;
 		if (iCoopNetLandListNum >= 64) break;
 		iCoopNetLandList[iCoopNetLandListNum] = iIdx;
 		iCoopNetLandListNum++;
 	}
+}
+
+// The people a location makes up as it loads (citizens, soldiers, carriers, the fantoms of jungles and
+// houses) are alike in every game, so they step aside for the owner's. Everybody else this game made
+// (the people of its own quests) is its own and always shown, like the officers.
+bool CoopNet_LandIsMadeUp(ref rChr)
+{
+	int iIdx = sti(rChr.index);
+	if (iIdx >= LOC_FANTOM_CHARACTERS && iIdx < LOC_FANTOM_CHARACTERS + MAX_CHARS_IN_LOC) return true;
+	if (CheckAttribute(rChr, "PhantomType") || CheckAttribute(rChr, "CityType")) return true;
+	if (CheckAttribute(rChr, "chr_ai.type") && rChr.chr_ai.type == "carrier") return true;
+	return false;
 }
 
 bool CoopNet_LandIsOfficer(ref rChr)
@@ -404,7 +417,7 @@ void CoopNet_LandHideOurPeople()
 		int iIdx = LAi_loginedcharacters[i];
 		if (iIdx < GlobalCharacters || iIdx == nMainCharacterIndex) continue;
 		ref rChr = &Characters[iIdx];
-		if (CheckAttribute(rChr, "coopLand") || CoopNet_LandIsOfficer(rChr)) continue;
+		if (CheckAttribute(rChr, "coopLand") || CoopNet_LandIsOfficer(rChr) || !CoopNet_LandIsMadeUp(rChr)) continue;
 		if (CheckAttribute(rChr, "coopLandHidden")) continue;
 		if (iCoopNetLandListNum >= 64) break;
 		iCoopNetLandList[iCoopNetLandListNum] = iIdx;

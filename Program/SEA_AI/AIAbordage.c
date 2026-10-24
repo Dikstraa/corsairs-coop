@@ -153,6 +153,8 @@ void Abordage_ReloadEndFade()
 
 void Sea_AbordageLoad(int _iAbordageMode, bool _bMCAbordageInitiator)
 {
+	ref rCoopBoarded = GetCharacter(iAbordageShipEnemyCharacter);
+	CoopNet_Log("sea: boarding " + rCoopBoarded.id + ", mode " + _iAbordageMode + ", we start it " + _bMCAbordageInitiator + ", its task " + rCoopBoarded.SeaAI.Task + ", puppet " + CheckAttribute(rCoopBoarded, "coopPuppet"));
 	if(LAi_IsDead(&characters[iAbordageShipEnemyCharacter]) == true && _iAbordageMode != FORT_ABORDAGE)
 	{
 		return;

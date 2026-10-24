@@ -247,7 +247,8 @@ void CoopNet_OnLand(int iFrom)
 	CoopNetLand.(sKey).here = fHere;
 	// a player is an ally, or a foe when our flags are at war
 	int iSide = COOPNET_LAND_ALLY;
-	if (iNation != sti(pchar.nation) && GetNationRelation(iNation, sti(pchar.nation)) == RELATION_ENEMY) iSide = COOPNET_LAND_FOE;
+	// (a hero being made anew for a new game has no nation yet)
+	if (CheckAttribute(pchar, "nation") && iNation != sti(pchar.nation) && GetNationRelation(iNation, sti(pchar.nation)) == RELATION_ENEMY) iSide = COOPNET_LAND_FOE;
 	CoopNetLand.(sKey).side = iSide;
 	aref arP;
 	makearef(arP, CoopNetLand.(sKey));
@@ -1331,6 +1332,14 @@ int iCoopNetLandTestRoomTicks = 0;
 // report, ~4 m/s), stands, runs back, stands, then draws its blade and strikes one of the host's
 // people 5 times. 35 s after reaching the town one of the host's people strikes the client's
 // puppet once; after 75 s the host goes to the tavern.
+// A test hero leaves the selection cabin by a script; in a real game the selection screen does it,
+// which sets up the hero's statistics (WayBeginning), read on every kill.
+void CoopNet_TestHeroReady()
+{
+	if (!CheckAttribute(pchar, "Statistic.Solder_s")) SetAllAchievements(0);
+	if (!CheckAttribute(pchar, "BaseNation")) pchar.BaseNation = pchar.nation;
+}
+
 void CoopNet_TestLand()
 {
 	if (iCoopNetLandTestStep < 0 || CoopNet_GetEnv("COOPNET_LANDTEST") != "1") return;
@@ -1344,9 +1353,7 @@ void CoopNet_TestLand()
 			if (bClient) iWait = 80;
 			if (iCoopNetLandTestRoomTicks == iWait)
 			{
-				// the cabin is left by the selection screen in a real game, which sets up the hero's statistics
-				if (!CheckAttribute(pchar, "Statistic.Solder_s")) SetAllAchievements(0);
-				if (!CheckAttribute(pchar, "BaseNation")) pchar.BaseNation = pchar.nation;
+				CoopNet_TestHeroReady();
 				DoReloadCharacterToLocation("Bridgetown_town", "reload", "reload1");
 			}
 		}

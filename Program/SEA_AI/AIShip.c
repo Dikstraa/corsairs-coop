@@ -3276,6 +3276,8 @@ void Ship_CheckMainCharacter()
 		float fEnemyMaxAbordageSpeed = Ship_CalcMaxAbordageSpeed(fEnemyGrappling);
 
 		bool bEnemyAngleTest = abs(fAng) > fEnemyMaxAbordageAngle && fRelativeSpeed < fEnemyMaxAbordageSpeed;
+		// CoopNet: another player's ship boards only when that player does it
+		if (CheckAttribute(rShipCharacter, "coopPuppet")) bEnemyAngleTest = false;
 		if (bEnemyAngleTest)
 		{
 			if (fAbordageDistance < fEnemyMaxAbordageDistance)
@@ -3964,7 +3966,7 @@ void Ship_UpdateParameters()
 				}
 		        else
 		        {
-					if (sti(rCharacter.SeaAI.Task) == AITASK_ABORDAGE)
+					if (sti(rCharacter.SeaAI.Task) == AITASK_ABORDAGE && !CheckAttribute(rCharacter, "coopPuppet")) // CoopNet: a puppet boards only when its player does
 					{
 						if (GetRelation(sti(rCharacter.index), sti(rTargetCharacter.index)) == RELATION_ENEMY)
 						{

@@ -289,6 +289,7 @@ void CoopNet_TestMap()
 		if (!CheckAttribute(pchar, "Ship.Pos.x")) { pchar.Ship.Pos.x = 0.0; pchar.Ship.Pos.z = 0.0; }
 		if (!CheckAttribute(pchar, "Ship.Ang.y")) pchar.Ship.Ang.y = 0.0; // the hero selection cabin has no ship angle
 		CoopNet_Log("test: Land_MapLoad from " + pchar.location);
+		CoopNet_TestHeroReady();
 		Land_MapLoad();
 		return;
 	}

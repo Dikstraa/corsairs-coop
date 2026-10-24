@@ -180,6 +180,10 @@ comes back with them there.
 - A puppet taken by boarding (`ShipTaken`, `ShipTakenFree`, or sunk by `ShipDead` here) is reported
   to its own machine, which loses that ship with this player as its killer; the taken character
   stops being a puppet here.
+- A puppet never boards on its own: the engine's "an enemy with a stronger crew alongside boards
+  the player" (`AIShip.c`, main character section) and the AI boarding task skip `coopPuppet` ships.
+  Without that, two players at war side by side were each boarded by the other's puppet while the
+  real ship there did nothing. A player still boards another player's puppet as any ship.
 - The script tick is re-registered at every game start and when the main menu opens, since loads
   and the game over clear the event handlers.
 

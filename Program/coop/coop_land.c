@@ -32,7 +32,7 @@
 
 #define COOPNET_MSG_LAND		160		// int id, string location, float x, y, z, ay, vx, vz, int flags, string model, string ani, string sex, string name, float here, int nation, extra
 #define COOPNET_MSG_LAND_PEOPLE	161		// int id, string location, int n, n x (int idx, string model, string ani, string sex, float x, y, z, ay, vx, vz, int flags, int side, extra)
-										// extra: int rank, int nation, string city, string type (GetCharType), float hp, float hpMax
+										// extra: int rank, int nation, string city, string type (GetCharType), float hp, float hpMax, string blade, string gun (equipped)
 #define COOPNET_MSG_LAND_HIT	162		// int owner, int idx + 1 (0: the hero), float damage, int attacker (player)
 #define COOPNET_MSG_LAND_KILL	163		// int to (the player who finished it), int owner, int idx + 1
 #define COOPNET_MSG_LAND_SWING	164		// int id, string location, int idx + 1 (0: the hero), string kind (fast, force, round, break, gun)
@@ -47,7 +47,7 @@
 #define COOPNET_LAND_PEOPLE		"CoopPeople"
 #define COOPNET_LAND_TICKS		5		// report every 5 ticks = 0.25 s
 #define COOPNET_LAND_PEOPLE_EVERY	2	// people every 2nd report = 0.5 s
-#define COOPNET_LAND_PER_MSG	6		// people per message (an unreliable message must fit one UDP packet, ~1190 bytes)
+#define COOPNET_LAND_PER_MSG	5		// people per message (an unreliable message must fit one UDP packet, ~1190 bytes)
 #define COOPNET_LAND_STALE		3.0		// seconds without a report before a player has left
 #define COOPNET_LAND_PEOPLE_STALE	1.6	// seconds without news before a person is gone
 #define COOPNET_LAND_LEAD		0.5		// seconds ahead a puppet runs to
@@ -701,6 +701,7 @@ void CoopNet_LandSteer(aref arP)
 	}
 	if (sti(arP.side) != sti(arP.chrSide)) CoopNet_LandSetSide(arP, rChr);
 	CoopNet_LandShowHealth(arP, rChr);
+	CoopNet_LandArm(arP, rChr);
 	bool bFight = iFlags == COOPNET_LAND_FIGHT;
 	if (bFight != sti(arP.fight))
 	{
@@ -827,6 +828,8 @@ void CoopNet_LandPutExtra(ref rChr)
 	CoopNet_PutString(GetCharType(rChr));
 	CoopNet_PutFloat(LAi_GetCharacterHP(rChr));
 	CoopNet_PutFloat(LAi_GetCharacterMaxHP(rChr));
+	CoopNet_PutString(GetCharacterEquipByGroup(rChr, BLADE_ITEM_TYPE));
+	CoopNet_PutString(GetCharacterEquipByGroup(rChr, GUN_ITEM_TYPE));
 }
 
 void CoopNet_LandGetExtra(aref arTo)
@@ -837,6 +840,8 @@ void CoopNet_LandGetExtra(aref arTo)
 	arTo.ctype = CoopNet_GetString();
 	arTo.hp = CoopNet_GetFloat();
 	arTo.hpMax = CoopNet_GetFloat();
+	arTo.blade = CoopNet_GetString();
+	arTo.gun = CoopNet_GetString();
 }
 
 void CoopNet_LandPutExtraFrom(aref arFrom)
@@ -847,6 +852,8 @@ void CoopNet_LandPutExtraFrom(aref arFrom)
 	CoopNet_PutString(arFrom.ctype);
 	CoopNet_PutFloat(stf(arFrom.hp));
 	CoopNet_PutFloat(stf(arFrom.hpMax));
+	CoopNet_PutString(arFrom.blade);
+	CoopNet_PutString(arFrom.gun);
 }
 
 void CoopNet_LandCopyExtra(aref arTo, aref arFrom)
@@ -857,6 +864,8 @@ void CoopNet_LandCopyExtra(aref arTo, aref arFrom)
 	arTo.ctype = arFrom.ctype;
 	arTo.hp = arFrom.hp;
 	arTo.hpMax = arFrom.hpMax;
+	arTo.blade = arFrom.blade;
+	arTo.gun = arFrom.gun;
 }
 
 // ---- kills ----------------------------------------------------------------------------------------
@@ -951,6 +960,26 @@ void CoopNet_LandSetSide(aref arP, ref rChr)
 }
 
 // A puppet shows the real one's health (and stays alive: it is immortal outside a hit).
+// A puppet carries the real one's blade and gun: without them it has nothing to draw, and its swings
+// and shots don't show.
+void CoopNet_LandArm(aref arP, ref rChr)
+{
+	CoopNet_LandArmWith(rChr, arP.blade, "coopBlade");
+	CoopNet_LandArmWith(rChr, arP.gun, "coopGun");
+}
+
+void CoopNet_LandArmWith(ref rChr, string sItem, string sHas)
+{
+	string sNow = "";
+	if (CheckAttribute(rChr, sHas)) sNow = rChr.(sHas);
+	if (sItem == sNow) return;
+	rChr.(sHas) = sItem;
+	if (sItem == "" || GetItemIndex(sItem) < 0) return;
+	if (GetCharacterItem(rChr, sItem) < 1) GiveItem2Character(rChr, sItem);
+	EquipCharacterByItem(rChr, sItem);
+	CoopNet_Log("land: " + rChr.id + " armed with " + sItem);
+}
+
 void CoopNet_LandShowHealth(aref arP, ref rChr)
 {
 	float fMax = stf(arP.hpMax);
@@ -1276,7 +1305,7 @@ void CoopNet_TestLand()
 			if (iCoopNetLandTestRoomTicks == iWait) DoReloadCharacterToLocation("Bridgetown_town", "reload", "reload1");
 		}
 	}
-	if (CoopNet_GetEnv("COOPNET_TALKTEST") == "1") return; // no fights: CoopNet_TestTalk
+	if (CoopNet_GetEnv("COOPNET_TALKTEST") == "1" || CoopNet_GetEnv("COOPNET_SWINGTEST") == "1") return; // no fights: CoopNet_TestTalk, CoopNet_TestSwing
 	if (!bClient)
 	{
 		if (CoopNet_LandHere() == "Bridgetown_town" && iCoopNetLandTicks == 0 && iCoopNetLandTestStep == 0 && CoopNet_Seconds() - fCoopNetLandArrivedAt > 35.0)
@@ -1518,4 +1547,34 @@ void CoopNet_TestTalk()
 		sLine = sLine + "; " + GetAttributeName(arP) + " " + fNear + " m flags " + arP.flags + " fight " + SendMessage(rP, "ls", MSG_CHARACTER_EX_MSG, "IsFightMode") + " tmpl " + rP.chr_ai.tmpl + " group " + rP.chr_ai.group;
 	}
 	CoopNet_Log(sLine);
+}
+
+// COOPNET_SWINGTEST=1 (with the land test, no fights): the client stands 3 m in front of the host
+// with its blade out and swings every 1.5 s, so the host's screen shows its puppet swinging.
+int iCoopNetSwingTestTicks = 0;
+
+void CoopNet_TestSwing()
+{
+	if (CoopNet_GetEnv("COOPNET_SWINGTEST") != "1" || CoopNet_GetEnv("COOPNET_TEST") != "client") return;
+	if (CoopNet_LandHere() != "Bridgetown_town" || !CheckAttribute(&CoopNetLand, "p0.x")) return;
+	iCoopNetSwingTestTicks++;
+	if (iCoopNetSwingTestTicks == 300)
+	{
+		float fAY = stf(CoopNetLand.p0.ay);
+		float fX = stf(CoopNetLand.p0.x) + sin(fAY) * 3.0;
+		float fZ = stf(CoopNetLand.p0.z) + cos(fAY) * 3.0;
+		TeleportCharacterToPosAy(pchar, fX, stf(CoopNetLand.p0.y), fZ, fAY + 3.1416);
+		GiveItem2Character(pchar, "blade6"); // the test hero has none
+		EquipCharacterByItem(pchar, "blade6");
+		LAi_SetFightMode(pchar, true);
+		CoopNet_Log("test: swing - in front of the host, blade out");
+	}
+	if (iCoopNetSwingTestTicks < 340) return;
+	int iPhase = iCoopNetSwingTestTicks - (iCoopNetSwingTestTicks / 30) * 30;
+	if (iPhase != 0) return;
+	string sKind = "fast";
+	int iKind = (iCoopNetSwingTestTicks / 30) - ((iCoopNetSwingTestTicks / 30) / 3) * 3;
+	if (iKind == 1) sKind = "force";
+	if (iKind == 2) sKind = "round";
+	Event("ChrFgtActApply", "as", pchar, sKind);
 }

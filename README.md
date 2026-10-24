@@ -312,7 +312,7 @@ officers fight in another player's location too: they are sent as allies, the ow
 attack their puppets and the blows reach the real officers, while the real officers attack the
 foes' puppets and get the kills.
 
-Every swing and shot is shown too, hit or not: `ChrFgtActApply` (the engine's "a blow starts" event,
+Puppets carry the real one's equipped blade and gun (sent with the other extras and equipped when they change: `CoopNet_LandArm`); before that they had none, so their swings showed nothing. Every swing and shot is shown too, hit or not: `ChrFgtActApply` (the engine's "a blow starts" event,
 which takes its energy) and `Location_CharacterFire` send `MSG_LAND_SWING` for the hero and the people
 we send, and their puppets play it at once and stand for 0.8 s (a walk task would cut the swing short);
 a hit that follows only turns the puppet to its target.

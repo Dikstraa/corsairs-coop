@@ -15,7 +15,8 @@
 # -TestGive, -TestSleep (with -TestLand): the client gives the host money and potions by F4; the client sleeps till morning, the host agrees.
 # -TestStory (with -TestLand): the host kills the tavern waitress once in the tavern; the client checks she died in its game too.
 # -TestTalk (with -TestLand): no fights; the host talks to a citizen, the client logs what the host's puppet and the people near it do.
-param([int]$Seconds = 60, [switch]$NewGame, [switch]$TestSkip, [switch]$ToMap, [switch]$TestWorld, [switch]$ToSea, [switch]$SeaJoin, [switch]$SeaFlags, [switch]$TestHero, [switch]$TestRules, [switch]$TestLand, [switch]$TestGive, [switch]$TestSleep, [switch]$TestStory, [switch]$TestTalk, [switch]$Keep)
+# -TestSwing (with -TestLand): no fights; the client stands in front of the host with a blade and swings every 1.5 s.
+param([int]$Seconds = 60, [switch]$NewGame, [switch]$TestSkip, [switch]$ToMap, [switch]$TestWorld, [switch]$ToSea, [switch]$SeaJoin, [switch]$SeaFlags, [switch]$TestHero, [switch]$TestRules, [switch]$TestLand, [switch]$TestGive, [switch]$TestSleep, [switch]$TestStory, [switch]$TestTalk, [switch]$TestSwing, [switch]$Keep)
 
 $game = Split-Path $PSScriptRoot -Parent
 $dev2 = Join-Path $game 'Maelstrom_dev2.exe'
@@ -54,6 +55,7 @@ if ($SeaJoin) { $env:COOPNET_SEAJOIN = '1' }
 if ($SeaFlags) { $env:COOPNET_SEAFLAGS = '1' }
 if ($TestRules) { $env:COOPNET_RULESTEST = '1' } # both instances
 if ($TestLand) { $env:COOPNET_LANDTEST = '1' } # both instances
+if ($TestSwing) { $env:COOPNET_SWINGTEST = '1' } # the client swings in front of the host's camera
 if ($TestTalk) { $env:COOPNET_TALKTEST = '1' } # the host talks to a citizen, the client logs what it sees
 if ($TestStory) { $env:COOPNET_STORYTEST = '1' } # the host kills a stock character, the client checks it
 if ($TestGive) { $env:COOPNET_GIVETEST = '1' } # the client gives the host money and potions
@@ -68,7 +70,7 @@ if ($TestSleep) { Remove-Item Env:COOPNET_AUTOVOTE -ErrorAction SilentlyContinue
 if ($TestSkip) { $env:COOPNET_AUTOVOTE = '1' }
 if ($TestHero) { $env:COOPNET_HEROTEST = '1' }
 $clientProc = Start-Process $dev2 -WorkingDirectory $game -PassThru
-Remove-Item Env:COOPNET_TEST, Env:COOPNET_NEWGAME, Env:COOPNET_AUTOVOTE, Env:COOPNET_TOMAP, Env:COOPNET_TESTWORLD, Env:COOPNET_TOSEA, Env:COOPNET_SEAJOIN, Env:COOPNET_SEAFLAGS, Env:COOPNET_HEROTEST, Env:COOPNET_RULESTEST, Env:COOPNET_LANDTEST, Env:COOPNET_GIVETEST, Env:COOPNET_SLEEPTEST, Env:COOPNET_STORYTEST, Env:COOPNET_TALKTEST -ErrorAction SilentlyContinue
+Remove-Item Env:COOPNET_TEST, Env:COOPNET_NEWGAME, Env:COOPNET_AUTOVOTE, Env:COOPNET_TOMAP, Env:COOPNET_TESTWORLD, Env:COOPNET_TOSEA, Env:COOPNET_SEAJOIN, Env:COOPNET_SEAFLAGS, Env:COOPNET_HEROTEST, Env:COOPNET_RULESTEST, Env:COOPNET_LANDTEST, Env:COOPNET_GIVETEST, Env:COOPNET_SLEEPTEST, Env:COOPNET_STORYTEST, Env:COOPNET_TALKTEST, Env:COOPNET_SWINGTEST -ErrorAction SilentlyContinue
 
 Start-Sleep 5 # the client reads start.ini at its start
 [IO.File]::WriteAllText($startIni, $startText)

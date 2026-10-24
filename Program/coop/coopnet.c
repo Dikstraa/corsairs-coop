@@ -664,6 +664,7 @@ void CoopNet_Tick()
 	CoopNet_TestSleep();
 	CoopNet_TestStory();
 	CoopNet_TestTalk();
+	CoopNet_TestSwing();
 	int iType = CoopNet_Recv();
 	while (iType != 0)
 	{

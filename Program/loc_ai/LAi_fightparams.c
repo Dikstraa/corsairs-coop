@@ -653,6 +653,8 @@ float LAi_GunReloadSpeed(aref chr)
 //#20200522-01
 void LAi_ApplyCharacterAttackDamage(aref attack, aref enemy, string attackType, bool isBlocked, bool blockSave)
 {
+	// CoopNet: an attacker that never equipped a blade has no chr_ai.special (the code below reads it)
+	if (!CheckAttribute(attack, "chr_ai.special")) CoopNet_LandFixSpecials(attack);
 	if(IsCharacterPerkOn(enemy, "Fencer") && rand(9)==1)  {Log_Info("Избежал удара!"); return;}
 	//Если неубиваемый, то нетрогаем его
 	if(CheckAttribute(enemy, "chr_ai.immortal"))

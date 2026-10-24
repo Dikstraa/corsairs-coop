@@ -925,6 +925,21 @@ void CoopNet_OnLandKill(int iFrom)
 	CoopNet_Log("land: " + rBy.id + " gets the kill of " + rDead.id + " (" + rDead.coopType + ", gun " + bGun + ")");
 }
 
+// From LAi_ApplyCharacterAttackDamage: an attacker without chr_ai.special (made when a blade is
+// equipped; a hero brought back by a script may lack it) gets its blade's, which the fight code reads.
+void CoopNet_LandFixSpecials(ref attack)
+{
+	string sBlade = GetCharacterEquipByGroup(attack, BLADE_ITEM_TYPE);
+	if (sBlade != "" && FindItem(sBlade) >= 0)
+	{
+		ref rItm = ItemsFromID(sBlade);
+		if (CheckAttribute(rItm, "special")) SetWeaponsSpecials(attack, rItm);
+		else UnsetSpecialAttributes(attack);
+	}
+	else UnsetSpecialAttributes(attack);
+	CoopNet_Log("land: " + attack.id + " had no blade specials, now those of '" + sBlade + "'");
+}
+
 // What LAi_ApplyCharacterAttackDamage / LAi_ApplyCharacterFireDamage give for a kill.
 void CoopNet_LandKillReward(ref attack, ref enemy, bool bGun)
 {
@@ -1327,7 +1342,13 @@ void CoopNet_TestLand()
 			iCoopNetLandTestRoomTicks++;
 			int iWait = 20;
 			if (bClient) iWait = 80;
-			if (iCoopNetLandTestRoomTicks == iWait) DoReloadCharacterToLocation("Bridgetown_town", "reload", "reload1");
+			if (iCoopNetLandTestRoomTicks == iWait)
+			{
+				// the cabin is left by the selection screen in a real game, which sets up the hero's statistics
+				if (!CheckAttribute(pchar, "Statistic.Solder_s")) SetAllAchievements(0);
+				if (!CheckAttribute(pchar, "BaseNation")) pchar.BaseNation = pchar.nation;
+				DoReloadCharacterToLocation("Bridgetown_town", "reload", "reload1");
+			}
 		}
 	}
 	if (CoopNet_GetEnv("COOPNET_TALKTEST") == "1" || CoopNet_GetEnv("COOPNET_SWINGTEST") == "1") return; // no fights: CoopNet_TestTalk, CoopNet_TestSwing

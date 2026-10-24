@@ -1276,6 +1276,7 @@ void CoopNet_TestLand()
 			if (iCoopNetLandTestRoomTicks == iWait) DoReloadCharacterToLocation("Bridgetown_town", "reload", "reload1");
 		}
 	}
+	if (CoopNet_GetEnv("COOPNET_TALKTEST") == "1") return; // no fights: CoopNet_TestTalk
 	if (!bClient)
 	{
 		if (CoopNet_LandHere() == "Bridgetown_town" && iCoopNetLandTicks == 0 && iCoopNetLandTestStep == 0 && CoopNet_Seconds() - fCoopNetLandArrivedAt > 35.0)
@@ -1437,4 +1438,84 @@ void CoopNet_TestSleep()
 		TavernWaitDate("wait_day");
 	}
 	if (iCoopNetSleepTestTicks == 1100) iCoopNetSleepTestTicks = -1;
+}
+
+// COOPNET_TALKTEST=1 (with the land test, no fights): the host talks to the citizen nearest to it;
+// the client logs every second what the host's puppet and the people around it do.
+int iCoopNetTalkTestTicks = 0;
+
+void CoopNet_TestTalk()
+{
+	if (iCoopNetTalkTestTicks < 0 || CoopNet_GetEnv("COOPNET_TALKTEST") != "1") return;
+	if (CoopNet_LandHere() != "Bridgetown_town") return;
+	iCoopNetTalkTestTicks++;
+	bool bClient = CoopNet_GetEnv("COOPNET_TEST") == "client";
+	float fX = 0.0;
+	float fY = 0.0;
+	float fZ = 0.0;
+	float fPX = 0.0;
+	float fPY = 0.0;
+	float fPZ = 0.0;
+	int i;
+	if (!bClient)
+	{
+		if (iCoopNetTalkTestTicks == 700)
+		{
+			SendMessage(pchar, "leee", MSG_CHARACTER_GETPOS, &fX, &fY, &fZ);
+			int iBest = -1;
+			float fBest = 1000.0;
+			for (i = 0; i < LAi_numloginedcharacters; i++)
+			{
+				int iIdx = LAi_loginedcharacters[i];
+				if (iIdx < GlobalCharacters || iIdx == nMainCharacterIndex) continue;
+				ref rC = &Characters[iIdx];
+				if (!CheckAttribute(rC, "CityType") || rC.CityType != "citizen" || LAi_IsDead(rC)) continue;
+				if (CheckAttribute(rC, "coopLand")) continue;
+				if (SendMessage(rC, "leee", MSG_CHARACTER_GETPOS, &fPX, &fPY, &fPZ) == 0) continue;
+				float fD = sqrt((fPX - fX) * (fPX - fX) + (fPZ - fZ) * (fPZ - fZ));
+				if (fD < fBest)
+				{
+					fBest = fD;
+					iBest = iIdx;
+				}
+			}
+			if (iBest < 0)
+			{
+				CoopNet_Log("test: talk - no citizen here");
+				iCoopNetTalkTestTicks = -1;
+				return;
+			}
+			ref rNpc = &Characters[iBest];
+			CoopNet_Log("test: talk - host talks to " + rNpc.id + " (index " + iBest + "), " + fBest + " m away");
+			LAi_SetActorType(rNpc);
+			LAi_ActorDialog(rNpc, pchar, "", 10.0, 0);
+		}
+		if (iCoopNetTalkTestTicks == 900 || iCoopNetTalkTestTicks == 1300)
+		{
+			CoopNet_Log("test: talk - host dialog " + dialogRun + ", fight " + SendMessage(pchar, "ls", MSG_CHARACTER_EX_MSG, "IsFightMode"));
+		}
+		if (iCoopNetTalkTestTicks == 1400) DialogExit();
+		return;
+	}
+	if (iCoopNetTalkTestTicks < 300 || iCoopNetTalkTestTicks > 1500) return;
+	if (iCoopNetTalkTestTicks - (iCoopNetTalkTestTicks / 20) * 20 != 0) return;
+	if (!CheckAttribute(&CoopNetLand, "p0.chr")) return;
+	ref rHost = &Characters[sti(CoopNetLand.p0.chr)];
+	SendMessage(rHost, "leee", MSG_CHARACTER_GETPOS, &fX, &fY, &fZ);
+	string sLine = "test: talk - host puppet flags " + CoopNetLand.p0.flags + " fight " + SendMessage(rHost, "ls", MSG_CHARACTER_EX_MSG, "IsFightMode") + " task " + rHost.chr_ai.tmpl;
+	// the people near it
+	aref arAll;
+	makearef(arAll, CoopNetLandPeople);
+	int iNum = GetAttributesNum(arAll);
+	for (i = 0; i < iNum; i++)
+	{
+		aref arP = GetAttributeN(arAll, i);
+		if (!CheckAttribute(arP, "chr")) continue;
+		ref rP = &Characters[sti(arP.chr)];
+		if (SendMessage(rP, "leee", MSG_CHARACTER_GETPOS, &fPX, &fPY, &fPZ) == 0) continue;
+		float fNear = sqrt((fPX - fX) * (fPX - fX) + (fPZ - fZ) * (fPZ - fZ));
+		if (fNear > 4.0) continue;
+		sLine = sLine + "; " + GetAttributeName(arP) + " " + fNear + " m flags " + arP.flags + " fight " + SendMessage(rP, "ls", MSG_CHARACTER_EX_MSG, "IsFightMode") + " tmpl " + rP.chr_ai.tmpl + " group " + rP.chr_ai.group;
+	}
+	CoopNet_Log(sLine);
 }

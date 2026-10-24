@@ -663,6 +663,7 @@ void CoopNet_Tick()
 	CoopNet_TestGive();
 	CoopNet_TestSleep();
 	CoopNet_TestStory();
+	CoopNet_TestTalk();
 	int iType = CoopNet_Recv();
 	while (iType != 0)
 	{

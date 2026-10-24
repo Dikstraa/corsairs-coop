@@ -14,7 +14,8 @@
 # -TestLand (with -NewGame): both go to Bridgetown; the client runs about, then draws its blade.
 # -TestGive, -TestSleep (with -TestLand): the client gives the host money and potions by F4; the client sleeps till morning, the host agrees.
 # -TestStory (with -TestLand): the host kills the tavern waitress once in the tavern; the client checks she died in its game too.
-param([int]$Seconds = 60, [switch]$NewGame, [switch]$TestSkip, [switch]$ToMap, [switch]$TestWorld, [switch]$ToSea, [switch]$SeaJoin, [switch]$SeaFlags, [switch]$TestHero, [switch]$TestRules, [switch]$TestLand, [switch]$TestGive, [switch]$TestSleep, [switch]$TestStory, [switch]$Keep)
+# -TestTalk (with -TestLand): no fights; the host talks to a citizen, the client logs what the host's puppet and the people near it do.
+param([int]$Seconds = 60, [switch]$NewGame, [switch]$TestSkip, [switch]$ToMap, [switch]$TestWorld, [switch]$ToSea, [switch]$SeaJoin, [switch]$SeaFlags, [switch]$TestHero, [switch]$TestRules, [switch]$TestLand, [switch]$TestGive, [switch]$TestSleep, [switch]$TestStory, [switch]$TestTalk, [switch]$Keep)
 
 $game = Split-Path $PSScriptRoot -Parent
 $dev2 = Join-Path $game 'Maelstrom_dev2.exe'
@@ -39,7 +40,11 @@ Get-Process Maelstrom, Maelstrom_dev2 -ErrorAction SilentlyContinue | Stop-Proce
 $startIni = Join-Path $game 'start.ini'
 $startText = [IO.File]::ReadAllText($startIni)
 [IO.File]::WriteAllText($startIni, ($startText -replace 'full_screen = 1', 'full_screen = 0'))
-Remove-Item (Join-Path $game 'coopnet.log'), (Join-Path $game 'error.log') -ErrorAction SilentlyContinue
+# a real game's log is kept as *.prev.log, not thrown away: it may be the one to look into
+foreach ($name in 'coopnet', 'error') {
+    $old = Join-Path $game "$name.log"
+    if (Test-Path $old) { Move-Item $old (Join-Path $game "$name.prev.log") -Force }
+}
 
 if ($NewGame) { $env:COOPNET_NEWGAME = '1' }
 if ($ToMap) { $env:COOPNET_TOMAP = '1' } # both instances press "New game" in the main menu
@@ -49,6 +54,7 @@ if ($SeaJoin) { $env:COOPNET_SEAJOIN = '1' }
 if ($SeaFlags) { $env:COOPNET_SEAFLAGS = '1' }
 if ($TestRules) { $env:COOPNET_RULESTEST = '1' } # both instances
 if ($TestLand) { $env:COOPNET_LANDTEST = '1' } # both instances
+if ($TestTalk) { $env:COOPNET_TALKTEST = '1' } # the host talks to a citizen, the client logs what it sees
 if ($TestStory) { $env:COOPNET_STORYTEST = '1' } # the host kills a stock character, the client checks it
 if ($TestGive) { $env:COOPNET_GIVETEST = '1' } # the client gives the host money and potions
 if ($TestSleep) { $env:COOPNET_SLEEPTEST = '1'; $env:COOPNET_AUTOVOTE = '1' } # the client sleeps, the host agrees
@@ -62,7 +68,7 @@ if ($TestSleep) { Remove-Item Env:COOPNET_AUTOVOTE -ErrorAction SilentlyContinue
 if ($TestSkip) { $env:COOPNET_AUTOVOTE = '1' }
 if ($TestHero) { $env:COOPNET_HEROTEST = '1' }
 $clientProc = Start-Process $dev2 -WorkingDirectory $game -PassThru
-Remove-Item Env:COOPNET_TEST, Env:COOPNET_NEWGAME, Env:COOPNET_AUTOVOTE, Env:COOPNET_TOMAP, Env:COOPNET_TESTWORLD, Env:COOPNET_TOSEA, Env:COOPNET_SEAJOIN, Env:COOPNET_SEAFLAGS, Env:COOPNET_HEROTEST, Env:COOPNET_RULESTEST, Env:COOPNET_LANDTEST, Env:COOPNET_GIVETEST, Env:COOPNET_SLEEPTEST, Env:COOPNET_STORYTEST -ErrorAction SilentlyContinue
+Remove-Item Env:COOPNET_TEST, Env:COOPNET_NEWGAME, Env:COOPNET_AUTOVOTE, Env:COOPNET_TOMAP, Env:COOPNET_TESTWORLD, Env:COOPNET_TOSEA, Env:COOPNET_SEAJOIN, Env:COOPNET_SEAFLAGS, Env:COOPNET_HEROTEST, Env:COOPNET_RULESTEST, Env:COOPNET_LANDTEST, Env:COOPNET_GIVETEST, Env:COOPNET_SLEEPTEST, Env:COOPNET_STORYTEST, Env:COOPNET_TALKTEST -ErrorAction SilentlyContinue
 
 Start-Sleep 5 # the client reads start.ini at its start
 [IO.File]::WriteAllText($startIni, $startText)

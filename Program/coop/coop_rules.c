@@ -238,8 +238,17 @@ void CoopNet_SpeedSet()
 {
 	CoopNet_Log("speed: this game at x" + (1.0 + iCoopNetSpeed * 0.25));
 	TimeScaleCounter = iCoopNetSpeed;
-	if (iCoopNetSpeed == 0) SetTimeScale(1.0);
-	else SetTimeScale(1.0 + iCoopNetSpeed * 0.25);
+	// as the time keys do (seadogs.c): the "TimeSpeed" mark tells R whether the game is sped up
+	if (iCoopNetSpeed == 0)
+	{
+		SetTimeScale(1.0);
+		if (IsPerkIntoList("TimeSpeed")) DelPerkFromActiveList("TimeSpeed");
+	}
+	else
+	{
+		SetTimeScale(1.0 + iCoopNetSpeed * 0.25);
+		if (!IsPerkIntoList("TimeSpeed")) AddPerkToActiveList("TimeSpeed");
+	}
 }
 
 void CoopNet_SpeedTick()

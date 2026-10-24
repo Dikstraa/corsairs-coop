@@ -316,11 +316,9 @@ void CoopNet_TestMap()
 	int iT = iCoopNetTestMapTicks;
 	if (iT == 300)
 	{
-		// the host speeds the game up: the client follows
-		TimeScaleCounter = 4;
-		SetTimeScale(2.0);
-		CoopNet_SpeedChanged();
-		CoopNet_Log("test: host speeds the game up to x2");
+		// the host speeds the game up with R (the "TimeScale" key, x2): the client follows
+		CoopNet_Log("test: host presses R (x2)");
+		Event("Control Activation", "s", "TimeScale");
 	}
 	if (iT == 600)
 	{

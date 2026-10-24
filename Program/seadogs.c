@@ -1508,6 +1508,7 @@ void ProcessControls()
 				TimeScaleCounter = 0;
                 Log_SetStringToLog("Time x1");
 				DelPerkFromActiveList("TimeSpeed");
+				CoopNet_SpeedChanged(); // co-op: the same speed for everybody
 			}
 			else
 			{
@@ -1515,6 +1516,7 @@ void ProcessControls()
 				TimeScaleCounter = 4;
                 Log_SetStringToLog("Time x2");
 				AddPerkToActiveList("TimeSpeed");
+				CoopNet_SpeedChanged(); // co-op: the same speed for everybody
 			}
 		break;
 		

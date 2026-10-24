@@ -100,6 +100,16 @@ void CoopNet_OnHeroAnswer()
 	iCoopNetHeroState = 2;
 	if (bCoopNetWorldInGame)
 	{
+		if (!CoopNet_HeroCanSwapHere())
+		{
+			// at sea, boarding or on the map the hero can't be swapped in place (its ships are in the scene,
+			// and the way back to the map is the land one): a game starts anew, as for a returning player
+			CoopNet_Log("hero: not on land, the game starts anew for our hero");
+			interfaceResultCommand = RC_INTERFACE_DO_NEW_GAME;
+			InterfaceStates.doUnFreeze = false;
+			SetEventHandler("frame", "InterfaceDoExit", 0);
+			return;
+		}
 		if (bCoopNetWorldSynced) CoopNet_HeroRequest();
 		return;
 	}
@@ -413,7 +423,8 @@ void CoopNet_HeroGoBack(aref arPack)
 {
 	int iMode = sti(arPack.place.mode);
 	string sLocation = arPack.place.location;
-	if (iMode == COOPNET_MODE_LAND && sLocation != "" && sLocation != COOPNET_HERO_SELECTION && FindLocation(sLocation) >= 0)
+	// a deck or a cabin is reached only from a sea scene: from there the ship is on the map, so it goes there
+	if (iMode == COOPNET_MODE_LAND && sLocation != "" && sLocation != COOPNET_HERO_SELECTION && FindLocation(sLocation) >= 0 && !CoopNet_HeroShipPlace(sLocation))
 	{
 		string sGroup = arPack.place.group;
 		string sLocator = arPack.place.locator;
@@ -427,6 +438,7 @@ void CoopNet_HeroGoBack(aref arPack)
 		return;
 	}
 	if (!sti(arPack.place.hasMap)) return; // never was on the map: stays where the new game began
+	if (!CoopNet_HeroCanSwapHere()) return; // the land way to the map needs a land location (CoopNet_OnHeroAnswer starts anew otherwise)
 	CoopNet_Log("hero: back to the world map at " + arPack.place.mapX + " " + arPack.place.mapZ);
 	worldMap.island = WDM_NONE_ISLAND;
 	worldMap.zeroX = arPack.place.mapX;
@@ -605,4 +617,23 @@ bool CoopNet_HeroDispatch(int iType, int iFrom)
 	if (iType == COOPNET_MSG_TREE_PART) CoopNet_OnTreePart(iFrom);
 	if (iType == COOPNET_MSG_TREE_END) CoopNet_OnTreeEnd(iFrom);
 	return true;
+}
+
+// The kept hero can replace this one in place only in a land location: from there it goes back to its
+// place by the land ways (a reload, or the land way to the map).
+bool CoopNet_HeroCanSwapHere()
+{
+	if (bSeaActive || bAbordageStarted || IsEntity(&worldMap)) return false;
+	if (!bCoopNetInLocation || !CheckAttribute(pchar, "location")) return false;
+	return FindLocation(pchar.location) >= 0;
+}
+
+// Locations on a ship (its deck, a cabin, a boarding deck): a hero put there without its sea scene
+// walks the deck and can't sail out.
+bool CoopNet_HeroShipPlace(string sLocation)
+{
+	int iLoc = FindLocation(sLocation);
+	if (iLoc < 0 || !CheckAttribute(&Locations[iLoc], "type")) return false;
+	string sType = Locations[iLoc].type;
+	return sType == "deck" || sType == "cap_cabine" || sType == "boarding_cabine" || sType == "deck_fight";
 }

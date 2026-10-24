@@ -9,6 +9,7 @@
 #include "session.h"
 #include "wire.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdarg>
@@ -1204,8 +1205,14 @@ DWORD __cdecl N_MapShipBind(VS_STACK *s)
                 addr = static_cast<BYTE *>(mbi.BaseAddress) + mbi.RegionSize;
             }
         }
+        // the known regions may overlap (a region's bounds as VirtualQuery gives them change as the heap
+        // grows), so one ship can be found twice: each address counts once
+        std::vector<float *> seen;
         for (int i = 0; i < have; ++i)
         {
+            if (std::find(seen.begin(), seen.end(), found[i]) != seen.end())
+                continue;
+            seen.push_back(found[i]);
             float *ax = nullptr, *pos = nullptr;
             if (ProbeMapShip(found[i], x, z, &ax, &pos))
             {
@@ -1214,12 +1221,14 @@ DWORD __cdecl N_MapShipBind(VS_STACK *s)
                 ship.pos = pos;
             }
         }
+        have = static_cast<int>(seen.size());
         fromHot = pass == 0;
     }
     if (ships == 1 && !fromHot)
     {
         MEMORY_BASIC_INFORMATION mbi;
-        if (VirtualQuery(ship.ax, &mbi, sizeof mbi) == sizeof mbi)
+        if (VirtualQuery(ship.ax, &mbi, sizeof mbi) == sizeof mbi &&
+            std::find(hot.begin(), hot.end(), static_cast<BYTE *>(mbi.BaseAddress)) == hot.end())
             hot.push_back(static_cast<BYTE *>(mbi.BaseAddress));
     }
     Log("map ship %s: kMaxSpeed %g found %d times, %d look like a ship at %.2f %.2f (%.0f ms%s)", enc.c_str(), key, have,

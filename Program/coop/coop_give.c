@@ -274,3 +274,18 @@ void CoopNet_TestGive()
 		iCoopNetGiveTestTicks = -1;
 	}
 }
+
+// COOPNET_MENUTEST=1 (with the land test): the client goes back to the main menu by the Esc menu's
+// button 20 s into Bridgetown.
+int iCoopNetMenuTestTicks = 0;
+
+void CoopNet_TestMainMenu()
+{
+	if (iCoopNetMenuTestTicks < 0 || CoopNet_GetEnv("COOPNET_MENUTEST") != "1") return;
+	if (CoopNet_GetEnv("COOPNET_TEST") != "client" || CoopNet_LandHere() != "Bridgetown_town") return;
+	iCoopNetMenuTestTicks++;
+	if (iCoopNetMenuTestTicks < 400) return;
+	iCoopNetMenuTestTicks = -1;
+	CoopNet_Log("test: menu - back to the main menu");
+	CoopNet_MenuMainMenu();
+}

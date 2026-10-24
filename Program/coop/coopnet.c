@@ -679,6 +679,7 @@ void CoopNet_Tick()
 	CoopNet_TestStory();
 	CoopNet_TestTalk();
 	CoopNet_TestSwing();
+	CoopNet_TestMainMenu();
 	int iType = CoopNet_Recv();
 	while (iType != 0)
 	{
@@ -1029,3 +1030,44 @@ void CoopNet_Dispatch(int iType)
 #include "coop\coop_land.c"
 #include "coop\coop_give.c"
 #include "coop\coop_story.c"
+
+// The main menu button of the Esc menu (INTERFACE/game_menu.c): back to the main menu without
+// quitting, as GameOver (seadogs.c) goes there, only with a loading picture instead of a death. A
+// client's hero goes to the host first, so nothing of it is lost; the co-op session stays.
+void CoopNet_MenuMainMenu()
+{
+	CoopNet_Log("menu: back to the main menu");
+	if (CoopNet_State() == COOPNET_CONNECTED && iCoopNetHeroState == 3) CoopNet_HeroUpload();
+	if (bSeaActive && !bAbordageStarted) SendMessage(&AIBalls, "l", MSG_MODEL_RELEASE); // as QuitProcess: no crash by a fort
+	PauseAllSounds();
+	ResetSound();
+	EngineLayersOffOn(false);
+	ClearEvents();
+	ClearPostEvents();
+	DeleteEntities();
+	if (sti(InterfaceStates.Launched)) UnloadSegment(Interfaces[CurrentInterface].SectionName);
+	if (LoadSegment("Interface\BaseInterface.c"))
+	{
+		InitBaseInterfaces();
+		UnloadSegment("Interface\BaseInterface.c");
+	}
+	InterfaceStates.showGameMenuOnExit = false;
+	InterfaceStates.Buttons.Resume.enable = false;
+	InterfaceStates.Buttons.Save.enable = false;
+	InitSound();
+	SetEventHandler(EVENT_END_VIDEO, "LaunchMainMenu_afterVideo", 0);
+	SetEventHandler("Control Activation", "proc_break_video", 0);
+	FadeOutMusic(3);
+	StartPictureAsVideo("loading\StartLoading_0.tga", 1);
+	// no game here any more: no world, no scene; the co-op tick (cleared with the events) goes on
+	// the scene flags too: the location's unload event went with the cleared events
+	CoopNet_LandForgetScene();
+	CoopNet_SeaForgetScene();
+	bCoopNetInLocation = false;
+	bSeaActive = false;
+	bAbordageStarted = false;
+	bCoopNetWorldInGame = false;
+	bCoopNetWorldSynced = false;
+	CoopNet_MapShipForget("");
+	if (bCoopNetTicking) CoopNet_StartTick();
+}

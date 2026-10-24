@@ -350,6 +350,10 @@ Every player keeps its own quests and journal. What is shared:
   they stand where its quest put them, the others see them as puppets and can help; the kill goes
   to whoever finished it, and the quest (a group check in its owner's game) goes on for its player.
 
+The Esc menu also has a "back to the main menu" button (`CoopNet_MenuMainMenu`): the way GameOver goes
+there (events, entities and interfaces cleared) with a loading picture, a client's hero sent to the
+host first, the session kept and the co-op tick started again. `run_pair.ps1 -TestLand -TestMenu`.
+
 ## Giving money and items
 
 `coop_give.c`: on land, within 4 m of another player, **F4** (bound only in the debug mode

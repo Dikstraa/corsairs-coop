@@ -242,6 +242,7 @@ int iCoopNetTestMenuSeen = 0;
 void CoopNet_TestNewGame()
 {
 	if (iCoopNetTestMenuSeen < 0 || CoopNet_GetEnv("COOPNET_NEWGAME") != "1") return;
+	if (CoopNet_TestInGame()) { iCoopNetTestMenuSeen = -1; return; } // in a game already (the hero flow started it): never again
 	if (CurrentInterface != INTERFACE_MAINMENU) return;
 	iCoopNetTestMenuSeen++;
 	if (iCoopNetTestMenuSeen < 60) return;

@@ -1340,6 +1340,12 @@ void CoopNet_TestHeroReady()
 	if (!CheckAttribute(pchar, "BaseNation")) pchar.BaseNation = pchar.nation;
 }
 
+// For CoopNet_TestNewGame (coopnet.c, above the declaration of bCoopNetWorldInGame).
+bool CoopNet_TestInGame()
+{
+	return bCoopNetWorldInGame;
+}
+
 void CoopNet_TestLand()
 {
 	if (iCoopNetLandTestStep < 0 || CoopNet_GetEnv("COOPNET_LANDTEST") != "1") return;

@@ -1121,3 +1121,31 @@ bool CoopNet_SeaJoinLogin()
 	CoopNet_Log("sea: logging in next to player " + arP.id + " at " + fX + " " + fZ + " (island '" + arP.island + "')");
 	return true;
 }
+// Every frame at sea: other players' flagships with their names over them (drawn by CoopNet.dll, which
+// finds the camera by this player's own ship).
+void CoopNet_SeaLabels()
+{
+	aref arList;
+	makearef(arList, CoopNetSea);
+	int iNum = GetAttributesNum(arList);
+	for (int i = 0; i < iNum; i++)
+	{
+		aref arP = GetAttributeN(arList, i);
+		if (!CheckAttribute(arP, "ships")) continue;
+		aref arShips;
+		makearef(arShips, arP.ships);
+		int iShips = GetAttributesNum(arShips);
+		for (int j = 0; j < iShips; j++)
+		{
+			aref arS = GetAttributeN(arShips, j);
+			if (sti(arS.flags) != COOPNET_SEA_FLAGSHIP || !CheckAttribute(arS, "chr")) continue;
+			if (!CheckAttribute(arS, "inSea") || !sti(arS.inSea)) continue;
+			if (CheckAttribute(arS, "sunk") && sti(arS.sunk)) continue;
+			ref rChr = &Characters[sti(arS.chr)];
+			if (!CheckAttribute(rChr, "Ship.Pos.x")) continue;
+			CoopNet_SeaMark(sti(arP.id), stf(rChr.Ship.Pos.x), stf(rChr.Ship.Pos.y) + 30.0, stf(rChr.Ship.Pos.z), arP.name);
+		}
+	}
+	if (!CheckAttribute(pchar, "Ship.Pos.x")) return;
+	CoopNet_SeaDrive(stf(pchar.Ship.Pos.x), stf(pchar.Ship.Pos.y), stf(pchar.Ship.Pos.z));
+}

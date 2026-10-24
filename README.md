@@ -82,11 +82,16 @@ Measured (`run_pair.ps1 -NewGame -ToMap`, the host sailing about with keys held 
 (measured on its map: they sail round islands, and the `speed` attribute is the engine's, before the
 wind), and mirrors are carried forward with those: at most 0.27 units of correction in a frame.
 
-Names: the DLL also draws each player's name under its ship (`map_labels.cpp`): the device's
-EndScene, SetTransform and Reset are redirected (every device here has a table of its own, so the
-game's table is found by the functions in it), the map camera is the one of the 3D scene (the map is
-drawn around the camera, so the object nearest the middle of the view is taken as the player's own
-ship and the others are placed from it), and the name is drawn with d3dx9_43.dll's font. A player
+Names: the DLL also draws each player's name over its ship, on the map and at sea (`map_labels.cpp`):
+the device's EndScene, SetTransform and Reset are redirected (every device here has a table of its
+own, so the game's table is found by the functions in it). Both scenes are drawn around the camera, so
+the player's own ship is found among the drawn objects and the others are placed from it. The camera
+follows the ship at a fixed offset, so once found the ship is tracked as the object nearest to where it
+was drawn; it is found first as the object near the middle of the view nearest to the camera (just
+"nearest the middle" took islands far along the line of sight, and every name jumped hundreds of units
+about). Mirrored views (reflections) are left out. At sea the script gives the other players'
+flagships every frame (`CoopNet_SeaMark`, `CoopNet_SeaDrive`). No names while a game window is open.
+The font is d3dx9_43.dll's. A player
 off the screen is shown at its edge with an arrow toward it; a player ashore or at sea keeps its ship
 where it left the map, named "(на суше)" / "(в море)". A player whose ship isn't driven (not made yet, or the fallback merchant) still gets its
 name where its report puts it (`CoopNet_MapMark`), so every player with a map position can be found.

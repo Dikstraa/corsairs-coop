@@ -1270,10 +1270,12 @@ float TurnBetween(float a, float b)
     return d;
 }
 
-// int CoopNet_MapShipDrive(float meX, float meZ)  every frame on the world map: puts every driven ship where it
-// is now; meX, meZ: this player's own ship (for the names drawn under the others)
+// int CoopNet_MapShipDrive(float meX, float meZ, int show)  every frame on the world map: puts every driven ship
+// where it is now; meX, meZ: this player's own ship (for the names drawn over the others); show 0: no
+// names (a window of the game is open over the map)
 DWORD __cdecl N_MapShipDrive(VS_STACK *s)
 {
+    long show = GetLong(Pop(s));
     float meZ = GetFloat(Pop(s));
     float meX = GetFloat(Pop(s));
     // Reports come twice a second, each with its own small error: snapping to every one makes the ship
@@ -1328,7 +1330,7 @@ DWORD __cdecl N_MapShipDrive(VS_STACK *s)
         m.lastX = x;
         m.lastZ = z;
         m.lastAy = ay;
-        if (!m.label.empty())
+        if (!m.label.empty() && show)
             labels.push_back({x, 0.0f, z, m.label});
         float off = std::sqrt((tx - x) * (tx - x) + (tz - z) * (tz - z));
         if (off > m.maxOff)
@@ -1350,10 +1352,11 @@ DWORD __cdecl N_MapShipDrive(VS_STACK *s)
             it = g_mapMarks.erase(it);
             continue;
         }
-        labels.push_back({it->second.x, 0.0f, it->second.z, it->second.text});
+        if (show)
+            labels.push_back({it->second.x, 0.0f, it->second.z, it->second.text});
         ++it;
     }
-    coopnet::SetMapLabels(labels, meX, meZ);
+    coopnet::SetLabels(labels, meX, 0.0f, meZ, false);
     return Return(s, static_cast<long>(g_mapShips.size()));
 }
 
@@ -1399,6 +1402,56 @@ DWORD __cdecl N_MapMark(VS_STACK *s)
     m.text = text;
     m.at = RealNow();
     return Return(s, 1L);
+}
+
+// At sea: other players' ships with their names over them, given every frame.
+struct SeaMark
+{
+    float x = 0, y = 0, z = 0;
+    std::string text;
+    double at = 0;
+};
+std::map<long, SeaMark> g_seaMarks;
+
+// int CoopNet_SeaMark(int id, float x, float y, float z, string text)  player id's name at x, y, z at sea
+DWORD __cdecl N_SeaMark(VS_STACK *s)
+{
+    std::string text = ArgString(Pop(s));
+    float z = GetFloat(Pop(s));
+    float y = GetFloat(Pop(s));
+    float x = GetFloat(Pop(s));
+    long id = GetLong(Pop(s));
+    SeaMark &m = g_seaMarks[id];
+    m.x = x;
+    m.y = y;
+    m.z = z;
+    m.text = text;
+    m.at = RealNow();
+    return Return(s, 1L);
+}
+
+// int CoopNet_SeaDrive(float meX, float meY, float meZ)  every frame at sea: the names given in the last
+// second are drawn; meX, meY, meZ: this player's own ship (by which the camera is found)
+DWORD __cdecl N_SeaDrive(VS_STACK *s)
+{
+    float meZ = GetFloat(Pop(s));
+    float meY = GetFloat(Pop(s));
+    float meX = GetFloat(Pop(s));
+    coopnet::HookMapLabels();
+    std::vector<coopnet::MapLabel> labels;
+    double now = RealNow();
+    for (auto it = g_seaMarks.begin(); it != g_seaMarks.end();)
+    {
+        if (now - it->second.at > 1.0)
+        {
+            it = g_seaMarks.erase(it);
+            continue;
+        }
+        labels.push_back({it->second.x, it->second.y, it->second.z, it->second.text});
+        ++it;
+    }
+    coopnet::SetLabels(labels, meX, meY, meZ, true);
+    return Return(s, static_cast<long>(labels.size()));
 }
 
 // int CoopNet_SetPanel(string text)  the player list F3 shows, lines split by '|'
@@ -1579,10 +1632,12 @@ const Native kNatives[] = {
     {"CoopNet_TestKey", "int", 2, N_TestKey},
     {"CoopNet_MapShipBind", "int", 4, N_MapShipBind},
     {"CoopNet_MapShipSet", "int", 6, N_MapShipSet},
-    {"CoopNet_MapShipDrive", "int", 2, N_MapShipDrive},
+    {"CoopNet_MapShipDrive", "int", 3, N_MapShipDrive},
     {"CoopNet_MapShipForget", "int", 1, N_MapShipForget},
     {"CoopNet_MapShipLabel", "int", 2, N_MapShipLabel},
     {"CoopNet_MapMark", "int", 4, N_MapMark},
+    {"CoopNet_SeaMark", "int", 5, N_SeaMark},
+    {"CoopNet_SeaDrive", "int", 3, N_SeaDrive},
     {"CoopNet_SetPanel", "int", 1, N_SetPanel},
     {"CoopNet_RollbackSave", "string", 1, N_RollbackSave},
     {"CoopNet_SaveLoaded", "int", 1, N_SaveLoaded},

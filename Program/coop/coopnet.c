@@ -49,9 +49,11 @@ native int CoopNet_MyId();
 native int CoopNet_TestKey(int vk, int down);
 native int CoopNet_MapShipBind(string enc, float kSpeed, float x, float z);
 native int CoopNet_MapShipSet(string enc, float x, float z, float vx, float vz, float ay);
-native int CoopNet_MapShipDrive(float meX, float meZ);
+native int CoopNet_MapShipDrive(float meX, float meZ, int show);
 native int CoopNet_MapShipForget(string enc);
 native int CoopNet_MapShipLabel(string enc, string text);
+native int CoopNet_SeaMark(int id, float x, float y, float z, string text);
+native int CoopNet_SeaDrive(float meX, float meY, float meZ);
 native int CoopNet_MapMark(int id, float x, float z, string text);
 native int CoopNet_SetPanel(string text);
 native int CoopNet_PeerCount();
@@ -620,6 +622,7 @@ void CoopNet_LogClock()
 // must go on. (A static #event_handler for "frame" is never called; ClearEvents at a game load or a
 // teleport may drop the handler, so the time hook puts it back.)
 float fCoopNetLastTick = 0.0;
+bool bCoopNetSeaLabels = false;	// in a session: names over other players' ships at sea
 
 void CoopNet_StartTick()
 {
@@ -631,7 +634,10 @@ void CoopNet_StartTick()
 void CoopNet_Frame()
 {
 	if (!bCoopNetTicking) return;
-	if (IsEntity(&worldMap)) CoopNet_MapShipDrive(stf(worldMap.playerShipX), stf(worldMap.playerShipZ)); // every frame: other players' ships on the map
+	int iShowNames = 1;
+	if (sti(InterfaceStates.Launched)) iShowNames = 0; // a window of the game over the scene: no names
+	if (IsEntity(&worldMap) && !bSeaActive) CoopNet_MapShipDrive(stf(worldMap.playerShipX), stf(worldMap.playerShipZ), iShowNames); // every frame: other players' ships on the map
+	if (bSeaActive && bCoopNetSeaLabels && iShowNames) CoopNet_SeaLabels(); // every frame: other players' names over their ships
 	float fNow = CoopNet_Seconds();
 	if (fNow - fCoopNetLastTick < COOPNET_TICK_MS / 1000.0) return;
 	fCoopNetLastTick = fNow;
@@ -640,6 +646,8 @@ void CoopNet_Frame()
 
 void CoopNet_Tick()
 {
+	int iNetState = CoopNet_State();
+	bCoopNetSeaLabels = iNetState == COOPNET_CONNECTED || iNetState == COOPNET_HOSTING;
 	CoopNet_UpdateStatus();
 	CoopNet_Update();
 	CoopNet_PresenceTick();

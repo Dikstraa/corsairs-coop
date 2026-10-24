@@ -1,10 +1,10 @@
-// Names under other players' ships on the world map, and the player list (F3).
+// Names over other players' ships on the world map and at sea, and the player list (F3).
 //
 // The engine gives a module no way to draw, so the game's Direct3D 9 device is used directly: its
 // EndScene (and Reset, for the font) is redirected through the device's table of methods, which every
 // device of d3d9.dll shares, found by making a throwaway device on a hidden window. In EndScene the
-// ships' map positions are projected with the camera the engine set (GetTransform), and each name is
-// drawn just below its ship with d3dx9_43.dll's font (shipped with the game), white over a shadow.
+// ships' positions are projected with the camera the engine set (SetTransform), and each name is
+// drawn just over its ship with d3dx9_43.dll's font (shipped with the game), white over a shadow.
 
 #include "map_labels.h"
 
@@ -72,17 +72,35 @@ SetTransform_t g_origSetTransform[kMaxTables] = {};
 
 // The camera the map was drawn with. By EndScene the interface has set its flat one, and the map is
 // drawn around the camera (its view is only turned, objects carry "position - camera"), so the
-// object nearest the middle of the view in a frame is taken as the player's own ship: the others are
-// placed from it (their position - the player's + that object's). This holds for a camera that moves too.
+// player's own ship is found among the objects of a frame and the others are placed from it (their
+// position - the player's + that object's). The camera follows the ship at a fixed offset, so once
+// found the ship stays where it was drawn: each frame takes the object nearest to that. Only to find it
+// first (or again after a zoom moved it for a while) the object nearest the middle of the view is
+// taken - which may be anything along the line of sight, an island far ahead too: that one put every
+// name hundreds of units off, jumping about as the view changed.
 D3DMATRIX g_view = {}, g_proj = {};
 bool g_projIs3d = false;
-float g_frameOff = 1e9f, g_frameCenter[3] = {};
+float g_frameOff = 1e9f, g_frameDepth = 1e9f, g_frameCenter[3] = {}; // this frame: the ship as found anew
 D3DMATRIX g_frameView = {}, g_frameProj = {};
+float g_trackDist = 1e9f, g_trackCenter[3] = {};	// this frame: the object nearest to where the ship was
+D3DMATRIX g_trackView = {}, g_trackProj = {};
 bool g_haveCam = false;
 float g_camCenter[3] = {};
 D3DMATRIX g_camView = {}, g_camProj = {};
-float g_meX = 0, g_meZ = 0;
+DWORD g_trackedAt = 0;	  // GetTickCount when the ship was last found where it was
+int g_reacquired = 0;	  // for the log
+float g_meX = 0, g_meY = 0, g_meZ = 0;
+// The sea is drawn around the camera the same way, so it is done the same way (with heights).
+bool g_sea = false;
+constexpr float kTrackNear = 10.0f;	// map units the ship may move from one frame to the next (zoom, waves)
+constexpr DWORD kTrackLost = 1500;	// ms without it before it is looked for anew
 int g_tables = 0;
+
+float Det(const D3DMATRIX &v)
+{
+    return v._11 * (v._22 * v._33 - v._23 * v._32) - v._12 * (v._21 * v._33 - v._23 * v._31) +
+           v._13 * (v._21 * v._32 - v._22 * v._31);
+}
 
 int TableOf(IDirect3DDevice9 *dev)
 {
@@ -234,7 +252,7 @@ void DrawLabels(IDirect3DDevice9 *dev)
     {
         // where the camera draws it: its offset from the player's ship + the ship's drawn position
         float px = l.x - g_meX + g_camCenter[0];
-        float py = g_camCenter[1];
+        float py = l.y - g_meY + g_camCenter[1];
         float pz = l.z - g_meZ + g_camCenter[2];
         // view -> clip (row vectors, as Direct3D's fixed pipeline)
         float vx = px * view._11 + py * view._21 + pz * view._31 + view._41;
@@ -255,7 +273,7 @@ void DrawLabels(IDirect3DDevice9 *dev)
             onScreen = sx > vp.X + margin && sx < vp.X + vp.Width - margin && sy > vp.Y + margin &&
                        sy < vp.Y + vp.Height - margin;
         }
-        LONG top = 14; // under the ship
+        LONG top = -30; // over the ship
         if (!onScreen)
         {
             // off the screen: at its edge, toward the ship, with an arrow
@@ -285,10 +303,14 @@ void DrawLabels(IDirect3DDevice9 *dev)
         g_font->DrawTextW(nullptr, w.c_str(), -1, &shadow, DT_CENTER | DT_TOP | DT_NOCLIP, D3DCOLOR_ARGB(200, 0, 0, 0));
         g_font->DrawTextW(nullptr, w.c_str(), -1, &r, DT_CENTER | DT_TOP | DT_NOCLIP, D3DCOLOR_ARGB(255, 255, 240, 200));
         static DWORD loggedAt = 0;
-        if (GetTickCount() - loggedAt > 60000)
+        static bool test = GetEnvironmentVariableA("COOPNET_TEST", nullptr, 0) > 0;
+        if (GetTickCount() - loggedAt > (test ? 1000u : 60000u))
         {
             loggedAt = GetTickCount();
-            Log("map labels: \"%s\" at %.1f %.1f on screen (%ux%u)", l.text.c_str(), sx, sy, vp.Width, vp.Height);
+            Log("map labels: \"%s\" at %.1f %.1f %s (%ux%u); ship %.1f %.1f, me %.1f %.1f, own ship drawn at %.1f %.1f %.1f, "
+                "found anew %d times",
+                l.text.c_str(), sx, sy, onScreen ? "on screen" : "at the edge", vp.Width, vp.Height, l.x, l.z, g_meX, g_meZ,
+                g_camCenter[0], g_camCenter[1], g_camCenter[2], g_reacquired);
         }
     }
 }
@@ -304,16 +326,30 @@ HRESULT __stdcall HookEndScene(IDirect3DDevice9 *dev)
     DrawLabels(dev);
     DrawPanel(dev);
     // the frame drawn: its camera is the one for the next labels
-    if (g_frameOff < 0.2f)
+    if (g_haveCam && g_trackDist < kTrackNear)
     {
+        g_camView = g_trackView;
+        g_camProj = g_trackProj;
+        g_camCenter[0] = g_trackCenter[0];
+        g_camCenter[1] = g_trackCenter[1];
+        g_camCenter[2] = g_trackCenter[2];
+        g_trackedAt = GetTickCount();
+    }
+    else if (g_frameOff < 0.2f && (!g_haveCam || GetTickCount() - g_trackedAt > kTrackLost))
+    {
+        if (g_haveCam)
+            ++g_reacquired;
         g_haveCam = true;
         g_camView = g_frameView;
         g_camProj = g_frameProj;
         g_camCenter[0] = g_frameCenter[0];
         g_camCenter[1] = g_frameCenter[1];
         g_camCenter[2] = g_frameCenter[2];
+        g_trackedAt = GetTickCount();
     }
     g_frameOff = 1e9f;
+    g_frameDepth = 1e9f;
+    g_trackDist = 1e9f;
     return g_origEndScene[TableOf(dev)](dev);
 }
 
@@ -329,19 +365,38 @@ HRESULT __stdcall HookSetTransform(IDirect3DDevice9 *dev, D3DTRANSFORMSTATETYPE 
         if (g_projIs3d)
             g_proj = *m;
     }
-    if (m && state == D3DTS_WORLD && g_projIs3d)
+    // a mirrored view draws the reflection in the water: left out
+    if (m && state == D3DTS_WORLD && g_projIs3d && Det(g_view) > 0.0f)
     {
         // the object nearest the middle of the view this frame: the camera looks at the player's ship
         const D3DMATRIX &v = g_view;
         float x = m->_41 * v._11 + m->_42 * v._21 + m->_43 * v._31 + v._41;
         float y = m->_41 * v._12 + m->_42 * v._22 + m->_43 * v._32 + v._42;
         float z = m->_41 * v._13 + m->_42 * v._23 + m->_43 * v._33 + v._43;
+        if (z > 1.0f && g_haveCam)
+        {
+            float dx = m->_41 - g_camCenter[0], dy = m->_42 - g_camCenter[1], dz = m->_43 - g_camCenter[2];
+            float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (dist < g_trackDist)
+            {
+                g_trackDist = dist;
+                g_trackCenter[0] = m->_41;
+                g_trackCenter[1] = m->_42;
+                g_trackCenter[2] = m->_43;
+                g_trackView = v;
+                g_trackProj = g_proj;
+            }
+        }
         if (z > 1.0f)
         {
+            // near the middle of the view (off < 0.2), the nearest to the camera: the ship, not an island
+            // far along the line of sight
             float off = (std::fabs(x) + std::fabs(y)) / z;
-            if (off < g_frameOff)
+            bool better = off < 0.2f ? (g_frameOff >= 0.2f || z < g_frameDepth) : off < g_frameOff;
+            if (better)
             {
                 g_frameOff = off;
+                g_frameDepth = z;
                 g_frameCenter[0] = m->_41;
                 g_frameCenter[1] = m->_42;
                 g_frameCenter[2] = m->_43;
@@ -486,12 +541,18 @@ void SetPanel(const std::string &text)
     g_panelAt = GetTickCount();
 }
 
-void SetMapLabels(const std::vector<MapLabel> &labels, float meX, float meZ)
+void SetLabels(const std::vector<MapLabel> &labels, float meX, float meY, float meZ, bool sea)
 {
     std::lock_guard<std::mutex> lock(g_mu);
     g_labels = labels;
     g_labelsAt = GetTickCount();
     g_meX = meX;
+    g_meY = meY;
     g_meZ = meZ;
+    if (sea != g_sea)
+    {
+        g_sea = sea;
+        g_haveCam = false; // the other scene's camera
+    }
 }
 } // namespace coopnet

@@ -88,7 +88,13 @@ game's table is found by the functions in it), the map camera is the one of the 
 drawn around the camera, so the object nearest the middle of the view is taken as the player's own
 ship and the others are placed from it), and the name is drawn with d3dx9_43.dll's font. A player
 off the screen is shown at its edge with an arrow toward it; a player ashore or at sea keeps its ship
-where it left the map, named "(на суше)" / "(в море)".
+where it left the map, named "(на суше)" / "(в море)". A player whose ship isn't driven (not made yet, or the fallback merchant) still gets its
+name where its report puts it (`CoopNet_MapMark`), so every player with a map position can be found.
+
+Player list: **F3** (free in the stock controls; read by the DLL itself, so it works on every screen)
+shows and hides a box with everybody in the session, where they are (map, sea, land with the town)
+and their ping. All traffic goes through the host, so a client's ping to another client is its own
+plus that one's to the host, which rides along in the presence message (`CoopNet_SetPanel`).
 
 Running into an avatar doesn't start a battle (`wdmEvent_ShipEncounter`, `INTERFACE/map.c` skip it);
 leftovers from an earlier visit are purged when the map opens.
@@ -305,6 +311,11 @@ A hit carries who dealt it (the hero or which of its people) and the blow (`fast
 officers fight in another player's location too: they are sent as allies, the owner's bandits
 attack their puppets and the blows reach the real officers, while the real officers attack the
 foes' puppets and get the kills.
+
+Every swing and shot is shown too, hit or not: `ChrFgtActApply` (the engine's "a blow starts" event,
+which takes its energy) and `Location_CharacterFire` send `MSG_LAND_SWING` for the hero and the people
+we send, and their puppets play it at once and stand for 0.8 s (a walk task would cut the swing short);
+a hit that follows only turns the puppet to its target.
 
 `run_pair.ps1 -NewGame -TestLand`: both go to Bridgetown, the client 15 s after the host, so the
 host owns the town; the client gets an officer for the test; one of the host's people strikes the

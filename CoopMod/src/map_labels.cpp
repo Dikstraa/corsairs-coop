@@ -1,4 +1,4 @@
-// Names under other players' ships on the world map.
+// Names under other players' ships on the world map, and the player list (F3).
 //
 // The engine gives a module no way to draw, so the game's Direct3D 9 device is used directly: its
 // EndScene (and Reset, for the font) is redirected through the device's table of methods, which every
@@ -118,6 +118,95 @@ void MakeFont(IDirect3DDevice9 *dev)
     Log("map labels: font ready");
 }
 
+std::wstring Wide(const std::string &text)
+{
+    int n = MultiByteToWideChar(1251, 0, text.c_str(), -1, nullptr, 0);
+    std::wstring w(n > 0 ? n : 1, L'\0');
+    if (n > 0)
+        MultiByteToWideChar(1251, 0, text.c_str(), -1, &w[0], n);
+    w.resize(wcslen(w.c_str()));
+    return w;
+}
+
+// The player list: F3 shows and hides it (read here, so it works on every screen of the game).
+std::string g_panel;
+DWORD g_panelAt = 0;
+bool g_panelOn = false, g_panelKey = false;
+
+bool GameActive()
+{
+    DWORD pid = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+    return pid == GetCurrentProcessId();
+}
+
+void DrawPanel(IDirect3DDevice9 *dev)
+{
+    static bool testOn = false;
+    if (!testOn)
+    {
+        testOn = true;
+        char flag[4] = {};
+        if (GetEnvironmentVariableA("COOPNET_PANELTEST", flag, sizeof flag) > 0 && flag[0] == '1')
+            g_panelOn = true; // test runs: shown from the start
+    }
+    bool down = (GetAsyncKeyState(VK_F3) & 0x8000) != 0 && GameActive();
+    if (down && !g_panelKey)
+    {
+        g_panelOn = !g_panelOn;
+        Log("player list %s", g_panelOn ? "shown" : "hidden");
+    }
+    g_panelKey = down;
+    if (!g_panelOn)
+        return;
+    std::string text;
+    {
+        std::lock_guard<std::mutex> lock(g_mu);
+        if (GetTickCount() - g_panelAt < 3000)
+            text = g_panel;
+    }
+    std::vector<std::wstring> lines;
+    size_t from = 0;
+    while (!text.empty() && from <= text.size())
+    {
+        size_t bar = text.find('|', from);
+        if (bar == std::string::npos)
+            bar = text.size();
+        lines.push_back(Wide(text.substr(from, bar - from)));
+        from = bar + 1;
+    }
+    if (lines.empty()) // "Кооператив: нет игры по сети"
+        lines.push_back(L"Кооператив: нет игры "
+                        L"по сети");
+    MakeFont(dev);
+    D3DVIEWPORT9 vp;
+    if (!g_font || dev != g_fontDevice || FAILED(dev->GetViewport(&vp)))
+        return;
+    LONG width = 300;
+    for (const auto &l : lines)
+    {
+        RECT r = {0, 0, 0, 0};
+        g_font->DrawTextW(nullptr, l.c_str(), -1, &r, DT_CALCRECT | DT_LEFT | DT_SINGLELINE, 0);
+        if (r.right + 40 > width)
+            width = r.right + 40;
+    }
+    const LONG row = 24;
+    LONG height = static_cast<LONG>(lines.size()) * row + 24;
+    LONG left = static_cast<LONG>(vp.X) + (static_cast<LONG>(vp.Width) - width) / 2;
+    LONG top = static_cast<LONG>(vp.Y + vp.Height / 6);
+    D3DRECT frame = {left - 2, top - 2, left + width + 2, top + height + 2};
+    D3DRECT box = {left, top, left + width, top + height};
+    dev->Clear(1, &frame, D3DCLEAR_TARGET, D3DCOLOR_ARGB(255, 170, 140, 70), 1.0f, 0);
+    dev->Clear(1, &box, D3DCLEAR_TARGET, D3DCOLOR_ARGB(255, 22, 26, 34), 1.0f, 0);
+    for (size_t i = 0; i < lines.size(); ++i)
+    {
+        LONG y = top + 12 + static_cast<LONG>(i) * row;
+        RECT r = {left + 20, y, left + width - 20, y + row};
+        D3DCOLOR color = i == 0 ? D3DCOLOR_ARGB(255, 240, 200, 110) : D3DCOLOR_ARGB(255, 235, 235, 235);
+        g_font->DrawTextW(nullptr, lines[i].c_str(), -1, &r, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOCLIP, color);
+    }
+}
+
 void DrawLabels(IDirect3DDevice9 *dev)
 {
     std::vector<coopnet::MapLabel> labels;
@@ -154,11 +243,7 @@ void DrawLabels(IDirect3DDevice9 *dev)
         float cx = vx * proj._11 + vy * proj._21 + vz * proj._31 + proj._41;
         float cy = vx * proj._12 + vy * proj._22 + vz * proj._32 + proj._42;
         float cw = vx * proj._14 + vy * proj._24 + vz * proj._34 + proj._44;
-        int n = MultiByteToWideChar(1251, 0, l.text.c_str(), -1, nullptr, 0);
-        std::wstring w(n > 0 ? n : 1, L'\0');
-        if (n > 0)
-            MultiByteToWideChar(1251, 0, l.text.c_str(), -1, &w[0], n);
-        w.resize(wcslen(w.c_str()));
+        std::wstring w = Wide(l.text);
         const float margin = 60.0f;
         float halfW = vp.Width * 0.5f, halfH = vp.Height * 0.5f;
         float sx = 0, sy = 0;
@@ -217,6 +302,7 @@ HRESULT __stdcall HookEndScene(IDirect3DDevice9 *dev)
         Log("map labels: the game draws through the hook");
     }
     DrawLabels(dev);
+    DrawPanel(dev);
     // the frame drawn: its camera is the one for the next labels
     if (g_frameOff < 0.2f)
     {
@@ -391,6 +477,13 @@ bool HookMapLabels()
     DestroyWindow(wnd);
     Log("map labels: hooked EndScene of %d device table(s)", hits);
     return g_tables > 0;
+}
+
+void SetPanel(const std::string &text)
+{
+    std::lock_guard<std::mutex> lock(g_mu);
+    g_panel = text;
+    g_panelAt = GetTickCount();
 }
 
 void SetMapLabels(const std::vector<MapLabel> &labels, float meX, float meZ)

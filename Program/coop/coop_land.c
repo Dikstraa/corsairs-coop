@@ -34,6 +34,8 @@
 										// extra: int rank, int nation, string city, string type (GetCharType), float hp, float hpMax
 #define COOPNET_MSG_LAND_HIT	162		// int owner, int idx + 1 (0: the hero), float damage, int attacker (player)
 #define COOPNET_MSG_LAND_KILL	163		// int to (the player who finished it), int owner, int idx + 1
+#define COOPNET_MSG_LAND_SWING	164		// int id, string location, int idx + 1 (0: the hero), string kind (fast, force, round, break, gun)
+#define COOPNET_LAND_SWING_TIME	0.8		// seconds a puppet stands for its swing before it walks on
 #define COOPNET_LAND_FIGHT		1		// flags: the blade is out
 #define COOPNET_LAND_DEAD		2		// flags: dead (with the blade: 3)
 #define COOPNET_LAND_NEUTRAL	0		// sides
@@ -729,6 +731,7 @@ void CoopNet_LandSteer(aref arP)
 		SetCharacterTask_Stay(rChr);
 		return;
 	}
+	if (CoopNet_LandSwinging(rChr)) return; // a new task would cut its swing short
 	if (fSpeed < COOPNET_LAND_STILL)
 	{
 		if (fBehind > COOPNET_LAND_NEAR)
@@ -1120,20 +1123,89 @@ int CoopNet_LandFindPuppet(int iPlayer, int iIdx)
 	return sti(CoopNetLandPeople.(sKey).chr);
 }
 
-// A puppet turns to its target and swings as its real one did (the blow itself came by message).
+// A puppet turns to its target and swings as its real one did (the blow itself came by message);
+// it swung already when the swing came first.
 void CoopNet_LandSwing(int iBy, ref rTarget, string sKind)
 {
 	ref rBy;
 	makeref(rBy, Characters[iBy]);
 	if (!IsEntity(rBy) || LAi_IsDead(rBy)) return;
 	CharacterTurnByChr(rBy, rTarget);
+	if (CoopNet_LandSwinging(rBy)) return;
+	CoopNet_LandPlaySwing(rBy, sKind);
+	CoopNet_Log("land: " + rBy.id + " swings (" + sKind + ") at " + rTarget.id);
+}
+
+bool CoopNet_LandSwinging(ref rChr)
+{
+	if (!CheckAttribute(rChr, "coopSwingAt")) return false;
+	return CoopNet_Seconds() - stf(rChr.coopSwingAt) < COOPNET_LAND_SWING_TIME;
+}
+
+void CoopNet_LandPlaySwing(ref rBy, string sKind)
+{
 	string sAction = "attack_fast_" + (1 + rand(2));
 	if (sKind == "force") sAction = "attack_force_" + (1 + rand(3));
 	if (sKind == "round") sAction = "attack_round_1";
 	if (sKind == "break") sAction = "attack_break_1";
 	if (sKind == "gun") sAction = "Shot";
+	rBy.coopSwingAt = CoopNet_Seconds();
 	CharacterPlayAction(rBy, sAction);
-	CoopNet_Log("land: " + rBy.id + " swings (" + sAction + ") at " + rTarget.id);
+}
+
+// Our hero or one of the people we send starts a swing or a shot (hit or not): its puppets in the
+// other games here swing too.
+void CoopNet_LandSwingOut(aref attack, string sKind)
+{
+	if (sKind != "fast" && sKind != "force" && sKind != "round" && sKind != "break" && sKind != "gun") return;
+	int iState = CoopNet_State();
+	if (iState != COOPNET_CONNECTED && iState != COOPNET_HOSTING) return;
+	if (CheckAttribute(attack, "coopLand") || CheckAttribute(attack, "coopLandHidden")) return;
+	int iIdx = sti(attack.index);
+	if (iIdx != nMainCharacterIndex)
+	{
+		if (iIdx < GlobalCharacters) return; // the stock ones are nobody's puppets
+		if (!bCoopNetLandOwner && !CoopNet_LandIsOfficer(attack)) return;
+	}
+	string sHere = CoopNet_LandHere();
+	if (sHere == "" || !CoopNet_LandOthersHere(sHere)) return;
+	int iBy = iIdx + 1;
+	if (iIdx == nMainCharacterIndex) iBy = 0;
+	CoopNet_Begin(COOPNET_MSG_LAND_SWING);
+	CoopNet_PutInt(CoopNet_MyId());
+	CoopNet_PutString(sHere);
+	CoopNet_PutInt(iBy);
+	CoopNet_PutString(sKind);
+	if (iState == COOPNET_HOSTING) CoopNet_Send(COOPNET_ALL, COOPNET_RELIABLE);
+	else CoopNet_Send(COOPNET_HOST_ID, COOPNET_RELIABLE);
+}
+
+void CoopNet_OnLandSwing(int iFrom)
+{
+	int iId = CoopNet_GetInt();
+	string sLoc = CoopNet_GetString();
+	int iIdx = CoopNet_GetInt() - 1;
+	string sKind = CoopNet_GetString();
+	if (iId == CoopNet_MyId()) return;
+	if (CoopNet_State() == COOPNET_HOSTING)
+	{
+		if (iId != iFrom) return; // clients speak only for themselves
+		CoopNet_Begin(COOPNET_MSG_LAND_SWING);
+		CoopNet_PutInt(iId);
+		CoopNet_PutString(sLoc);
+		CoopNet_PutInt(iIdx + 1);
+		CoopNet_PutString(sKind);
+		CoopNet_Send(COOPNET_ALL, COOPNET_RELIABLE);
+	}
+	if (sLoc != CoopNet_LandHere()) return;
+	int iChr = CoopNet_LandFindPuppet(iId, iIdx);
+	if (iChr < 0) return;
+	ref rBy;
+	makeref(rBy, Characters[iChr]);
+	if (!IsEntity(rBy) || LAi_IsDead(rBy)) return;
+	SetCharacterTask_Stay(rBy);
+	CoopNet_LandPlaySwing(rBy, sKind);
+	if (iIdx < 0) CoopNet_Log("land: player " + iId + " swings (" + sKind + ")");
 }
 
 // Returns true when the message was a land message.
@@ -1157,6 +1229,11 @@ bool CoopNet_LandDispatch(int iType, int iFrom)
 	if (iType == COOPNET_MSG_LAND_KILL)
 	{
 		CoopNet_OnLandKill(iFrom);
+		return true;
+	}
+	if (iType == COOPNET_MSG_LAND_SWING)
+	{
+		CoopNet_OnLandSwing(iFrom);
 		return true;
 	}
 	return false;
@@ -1235,6 +1312,9 @@ void CoopNet_TestLand()
 		CoopNet_Log("test: land blade out");
 		LAi_SetFightMode(pchar, true);
 	}
+	// swings at the air, as the engine reports them: the host's puppet of us swings too
+	if (iStep == 62) Event("ChrFgtActApply", "as", pchar, "fast");
+	if (iStep == 75) Event("ChrFgtActApply", "as", pchar, "force");
 	if (iStep == 80) iCoopNetLandTestStep = -1;
 }
 

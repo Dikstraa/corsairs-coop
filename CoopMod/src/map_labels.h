@@ -21,6 +21,9 @@ bool HookMapLabels();
 // not renewed for a moment (the map closed) is not drawn.
 void SetMapLabels(const std::vector<MapLabel> &labels, float meX, float meZ);
 
+// The player list shown while F3 is toggled on: lines split by '|', in the game's code page.
+void SetPanel(const std::string &text);
+
 // A line for coopnet.log (coopnet.cpp).
 void LogLine(const char *line);
 } // namespace coopnet

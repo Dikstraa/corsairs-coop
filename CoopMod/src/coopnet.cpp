@@ -25,7 +25,7 @@ using namespace mael;
 namespace
 {
 
-constexpr long kVersion = 9;
+constexpr long kVersion = 10;
 
 // Message types 10..99 are handled inside the DLL and never reach scripts.
 enum : uint16_t
@@ -1078,6 +1078,15 @@ struct MapShip
 };
 std::map<std::string, MapShip> g_mapShips;
 
+// A player's name on the map with no ship under it, kept 3 s after its last word.
+struct MapMark
+{
+    float x = 0, z = 0;
+    std::string text;
+    double at = 0;
+};
+std::map<long, MapMark> g_mapMarks;
+
 // Whether the floats before a kMaxSpeed at k look like a WdmShip standing at x, z.
 bool ProbeMapShip(float *k, float x, float z, float **outAx, float **outPos)
 {
@@ -1333,6 +1342,17 @@ DWORD __cdecl N_MapShipDrive(VS_STACK *s)
         }
         ++it;
     }
+    // players without a ship of their own here (not made yet, or not driven): their name where they are
+    for (auto it = g_mapMarks.begin(); it != g_mapMarks.end();)
+    {
+        if (now - it->second.at > 3.0)
+        {
+            it = g_mapMarks.erase(it);
+            continue;
+        }
+        labels.push_back({it->second.x, 0.0f, it->second.z, it->second.text});
+        ++it;
+    }
     coopnet::SetMapLabels(labels, meX, meZ);
     return Return(s, static_cast<long>(g_mapShips.size()));
 }
@@ -1357,6 +1377,36 @@ DWORD __cdecl N_MapShipForget(VS_STACK *s)
         g_mapShips.clear();
     else
         g_mapShips.erase(enc);
+    return Return(s, 1L);
+}
+
+// int CoopNet_MapMark(int id, float x, float z, string text)  player id's name drawn at x, z on the map
+// while it has no driven ship there ("": none)
+DWORD __cdecl N_MapMark(VS_STACK *s)
+{
+    std::string text = ArgString(Pop(s));
+    float z = GetFloat(Pop(s));
+    float x = GetFloat(Pop(s));
+    long id = GetLong(Pop(s));
+    if (text.empty())
+    {
+        g_mapMarks.erase(id);
+        return Return(s, 1L);
+    }
+    MapMark &m = g_mapMarks[id];
+    m.x = x;
+    m.z = z;
+    m.text = text;
+    m.at = RealNow();
+    return Return(s, 1L);
+}
+
+// int CoopNet_SetPanel(string text)  the player list F3 shows, lines split by '|'
+DWORD __cdecl N_SetPanel(VS_STACK *s)
+{
+    std::string text = ArgString(Pop(s));
+    coopnet::HookMapLabels();
+    coopnet::SetPanel(text);
     return Return(s, 1L);
 }
 
@@ -1532,6 +1582,8 @@ const Native kNatives[] = {
     {"CoopNet_MapShipDrive", "int", 2, N_MapShipDrive},
     {"CoopNet_MapShipForget", "int", 1, N_MapShipForget},
     {"CoopNet_MapShipLabel", "int", 2, N_MapShipLabel},
+    {"CoopNet_MapMark", "int", 4, N_MapMark},
+    {"CoopNet_SetPanel", "int", 1, N_SetPanel},
     {"CoopNet_RollbackSave", "string", 1, N_RollbackSave},
     {"CoopNet_SaveLoaded", "int", 1, N_SaveLoaded},
 };

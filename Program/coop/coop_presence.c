@@ -8,7 +8,7 @@
 // too far from where the player is now (last report + its speed since) or the course changes.
 // Every player measures its own map speed (the receiver can't: reports arrive unevenly).
 
-#define COOPNET_MSG_PRESENCE		110		// int id, int mode, int hasMap, float x, float z, float ay, string place, string name, int busy (boarding), float vx, float vz
+#define COOPNET_MSG_PRESENCE		110		// int id, int mode, int hasMap, float x, float z, float ay, string place, string name, int busy (boarding), float vx, float vz, int ping to the host + 1 (0: unknown)
 #define COOPNET_PRESENCE_TICKS		10		// send every 10 ticks = 0.5 s
 #define COOPNET_PRESENCE_PERIOD		0.5
 #define COOPNET_PRESENCE_STALE		20		// periods without news (10 s) before a player is dropped
@@ -64,6 +64,7 @@ void CoopNet_PresenceTick()
 		CoopNetPlayers.(sMe).busy = bAbordageStarted && !bCabinStarted && !bDeckBoatStarted;
 		if (iState == COOPNET_HOSTING) CoopNet_BroadcastPresence();
 		else CoopNet_SendPresence(iMe, COOPNET_HOST_ID);
+		CoopNet_UpdatePanel();
 	}
 	CoopNet_UpdateAvatars();
 }
@@ -182,6 +183,18 @@ void CoopNet_SendPresence(int iId, int iTo)
 	CoopNet_PutInt(iBusy);
 	CoopNet_PutFloat(stf(arP.vx));
 	CoopNet_PutFloat(stf(arP.vz));
+	// its ping to the host: the host measures every client's, a client its own
+	int iPing = -1;
+	if (iId == CoopNet_MyId())
+	{
+		if (CoopNet_State() == COOPNET_HOSTING) iPing = 0;
+		else iPing = CoopNet_Ping(COOPNET_HOST_ID);
+	}
+	else
+	{
+		if (CoopNet_State() == COOPNET_HOSTING) iPing = CoopNet_Ping(iId);
+	}
+	CoopNet_PutInt(iPing + 1);
 	CoopNet_Send(iTo, COOPNET_UNRELIABLE);
 }
 
@@ -211,11 +224,79 @@ void CoopNet_OnPresence(int iFrom)
 	int iBusy = CoopNet_GetInt();
 	float fVX = CoopNet_GetFloat();
 	float fVZ = CoopNet_GetFloat();
+	int iPing = CoopNet_GetInt() - 1;
 	if (iId == CoopNet_MyId()) return;
 	if (CoopNet_State() == COOPNET_HOSTING && iId != iFrom) return; // clients speak only for themselves
 	CoopNet_StorePresence(iId, iMode, iHasMap, fX, fZ, fAY, sPlace, sName, fVX, fVZ);
 	string sKey = "p" + iId;
 	CoopNetPlayers.(sKey).busy = iBusy;
+	CoopNetPlayers.(sKey).ping = iPing;
+}
+
+// ---- the player list (F3, drawn by CoopNet.dll) ------------------------------------
+
+void CoopNet_UpdatePanel()
+{
+	int iMe = CoopNet_MyId();
+	bool bHost = CoopNet_State() == COOPNET_HOSTING;
+	aref arPlayers;
+	makearef(arPlayers, CoopNetPlayers);
+	int iNum = GetAttributesNum(arPlayers);
+	string sText = "Игроки в сессии: " + iNum + "    (F3 - закрыть)";
+	for (int i = 0; i < iNum; i++)
+	{
+		aref arP = GetAttributeN(arPlayers, i);
+		int iId = sti(arP.id);
+		string sLine = arP.name;
+		if (iId == COOPNET_HOST_ID) sLine = sLine + " [хост]";
+		if (iId == iMe) sLine = sLine + " [вы]";
+		sLine = sLine + "  -  " + CoopNet_PanelWhere(arP);
+		// everything goes through the host: a client's way to another client is both pings to it
+		int iPing = -1;
+		if (bHost)
+		{
+			if (iId != iMe) iPing = CoopNet_Ping(iId);
+		}
+		else
+		{
+			iPing = CoopNet_Ping(COOPNET_HOST_ID);
+			if (iId != iMe && iId != COOPNET_HOST_ID)
+			{
+				int iTheirs = -1;
+				if (CheckAttribute(arP, "ping")) iTheirs = sti(arP.ping);
+				if (iTheirs < 0 || iPing < 0) iPing = -1;
+				else iPing = iPing + iTheirs;
+			}
+		}
+		if (bHost && iId == iMe) sLine = sLine + "  -  пинг: -";
+		else
+		{
+			if (iPing < 0) sLine = sLine + "  -  пинг: ?";
+			else sLine = sLine + "  -  пинг: " + iPing + " мс";
+		}
+		sText = sText + "|" + sLine;
+	}
+	CoopNet_SetPanel(sText);
+}
+
+string CoopNet_PanelWhere(aref arP)
+{
+	int iMode = sti(arP.mode);
+	if (iMode == COOPNET_MODE_WORLDMAP) return "на карте";
+	if (iMode == COOPNET_MODE_SEA) return "в море";
+	if (iMode == COOPNET_MODE_LAND)
+	{
+		string sPlace = arP.place;
+		int iLoc = FindLocation(sPlace);
+		if (iLoc >= 0 && CheckAttribute(&Locations[iLoc], "fastreload"))
+		{
+			string sCity = Locations[iLoc].fastreload;
+			string sTown = GetConvertStr(sCity + " Town", "LocLables.txt");
+			if (sTown != "") return "на суше: " + sTown;
+		}
+		return "на суше";
+	}
+	return "в меню";
 }
 
 // ---- avatars on the world map ----------------------------------------------------
@@ -246,10 +327,29 @@ void CoopNet_UpdateAvatars()
 		if (sti(arP.mode) == COOPNET_MODE_MENU || sti(arP.hasMap) == 0)
 		{
 			CoopNet_AvatarRemove(arP);
+			CoopNet_MapMark(sti(arP.id), 0.0, 0.0, "");
 			continue;
 		}
 		CoopNet_AvatarSync(arP);
+		CoopNet_AvatarMark(arP);
 	}
+}
+
+// A player whose ship isn't driven here (not made yet, or an ordinary merchant) still has its name
+// where it is, so it can be found on the map from anywhere.
+void CoopNet_AvatarMark(aref arP)
+{
+	int iId = sti(arP.id);
+	if (CheckAttribute(arP, "encDriven") && sti(arP.encDriven))
+	{
+		CoopNet_MapMark(iId, 0.0, 0.0, "");
+		return;
+	}
+	float fAge = CoopNet_Seconds() - stf(arP.at);
+	if (fAge > COOPNET_AVATAR_MAX_GUESS) fAge = COOPNET_AVATAR_MAX_GUESS;
+	float fX = stf(arP.x) + stf(arP.vx) * fAge;
+	float fZ = stf(arP.z) + stf(arP.vz) * fAge;
+	CoopNet_MapMark(iId, fX, fZ, CoopNet_AvatarLabel(arP));
 }
 
 void CoopNet_AvatarSync(aref arP)

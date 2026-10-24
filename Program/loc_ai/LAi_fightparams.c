@@ -1901,6 +1901,7 @@ void LAi_ChrFightActionApply()
 {
 	aref attack = GetEventData();
 	string attackType = GetEventData();
+	CoopNet_LandSwingOut(attack, attackType);
 	float needEnergy = LAi_CalcUseEnergyForBlade(attack, attackType);
 	Lai_CharacterChangeEnergy(attack, -needEnergy);
 }

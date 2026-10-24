@@ -52,6 +52,8 @@ native int CoopNet_MapShipSet(string enc, float x, float z, float vx, float vz, 
 native int CoopNet_MapShipDrive(float meX, float meZ);
 native int CoopNet_MapShipForget(string enc);
 native int CoopNet_MapShipLabel(string enc, string text);
+native int CoopNet_MapMark(int id, float x, float z, string text);
+native int CoopNet_SetPanel(string text);
 native int CoopNet_PeerCount();
 native int CoopNet_PeerId(int index);
 native string CoopNet_PeerName(int id);

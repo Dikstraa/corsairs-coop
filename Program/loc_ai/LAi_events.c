@@ -299,6 +299,7 @@ void LAi_CharacterFire()
 	aref enemy = GetEventData();
 	float kDist = GetEventData();	//0..1
 	int isFindedEnemy = GetEventData();
+	CoopNet_LandSwingOut(attack, "gun");
 	//Заряд персонажа
 	if(!CheckAttribute(attack, "chr_ai.charge")) attack.chr_ai.charge = "0";
 	if (attack.chr_ai.sgun == "pistol_grapebok" && stf(attack.chr_ai.charge) < 3) return; 

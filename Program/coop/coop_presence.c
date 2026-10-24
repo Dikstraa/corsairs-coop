@@ -42,12 +42,26 @@ void CoopNet_PresenceTick()
 		CoopNet_ForgetPlayers();
 		return;
 	}
-	if (IsEntity(&worldMap))
+	if (bSeaActive && !bAbordageStarted && CheckAttribute(pchar, "Ship.Pos.x"))
 	{
-		fCoopNetMapX = stf(worldMap.playerShipX);
-		fCoopNetMapZ = stf(worldMap.playerShipZ);
-		fCoopNetMapAY = stf(worldMap.playerShipAY);
+		// at sea the map's own position stays where the scene began (the map object lives on, not
+		// updated): it is worked out from the ship as the game does when it returns to the map
+		// (getRTplayerShipXZ: sea / scale + the map point the scene was made around)
+		float fScale = CoopNet_SeaScale();
+		fCoopNetMapX = stf(pchar.Ship.Pos.x) / fScale + stf(worldMap.zeroX);
+		fCoopNetMapZ = stf(pchar.Ship.Pos.z) / fScale + stf(worldMap.zeroZ);
+		fCoopNetMapAY = stf(pchar.Ship.Ang.y);
 		bCoopNetHasMapPos = true;
+	}
+	else
+	{
+		if (IsEntity(&worldMap))
+		{
+			fCoopNetMapX = stf(worldMap.playerShipX);
+			fCoopNetMapZ = stf(worldMap.playerShipZ);
+			fCoopNetMapAY = stf(worldMap.playerShipAY);
+			bCoopNetHasMapPos = true;
+		}
 	}
 	iCoopNetPresenceTicks++;
 	if (iCoopNetPresenceTicks >= COOPNET_PRESENCE_TICKS)

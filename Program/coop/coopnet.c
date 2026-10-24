@@ -368,6 +368,14 @@ void CoopNet_TestSea()
 		CoopNet_Log("test: host sets full sails");
 		Ship_SetSailState(nMainCharacterIndex, 1.0);
 	}
+	if (iCoopNetTestMapTicks == 650 && bSeaActive && CoopNet_State() == COOPNET_HOSTING)
+	{
+		// x7 as the time keys give it: with the client's ships in the scene both stay at x2
+		CoopNet_Log("test: host speeds the sea up to x7");
+		TimeScaleCounter = 24;
+		SetTimeScale(7.0);
+		CoopNet_SpeedChanged();
+	}
 	if (iCoopNetTestMapTicks == 1100 && bSeaActive && CoopNet_State() == COOPNET_HOSTING)
 	{
 		CoopNet_Log("test: host goes back to the map");

@@ -278,10 +278,12 @@ void DrawLabels(IDirect3DDevice9 *dev)
         {
             // off the screen: at its edge, toward the ship, with an arrow
             float dx = cx, dy = -cy;
-            if (cw < 0.0f)
+            if (cw <= 0.01f)
             {
-                dx = -dx;
-                dy = -dy;
+                // behind the camera the projection turns over: as on a chart instead, ahead up, behind
+                // down, left and right as they are
+                dx = vx;
+                dy = -vz;
             }
             float len = std::sqrt(dx * dx + dy * dy);
             if (len < 1e-6f)

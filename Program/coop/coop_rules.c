@@ -17,6 +17,7 @@
 #define COOPNET_ROLLBACK_DELAY		4.0		// seconds between a client's death and the host's reload
 #define COOPNET_MSG_SPEED		153		// int counter + 100 (TimeScaleCounter; negatives compare as unsigned), string by
 #define COOPNET_SPEED_EVERY		5.0		// seconds between the host's reminders of the speed (for players who came in later)
+#define COOPNET_SPEED_SEA_MAX	4		// x2 at most at sea with another player's ships in the scene: faster, their ships fall far behind
 
 float fCoopNetRollbackAt = -1.0;	// host: when to load the latest save
 bool bCoopNetPausedForBoarding = false;
@@ -24,6 +25,7 @@ int iCoopNetSpeed = 0;			// the shared TimeScaleCounter
 float fCoopNetSpeedSentAt = 0.0;
 float fCoopNetSpeedOwnAt = -10.0;	// when this player last changed the speed itself
 float fCoopNetSpeedWhyAt = 0.0;
+float fCoopNetSpeedCapAt = -100.0;	// when the sea cap was last told
 float fCoopNetPauseNoticeAt = 0.0;
 
 // ---- death and rollback -----------------------------------------------------------------------
@@ -185,6 +187,7 @@ void CoopNet_SpeedChanged()
 	fCoopNetSpeedOwnAt = CoopNet_Seconds();
 	iCoopNetSpeed = TimeScaleCounter;
 	CoopNet_SpeedSend(CoopNet_PeerName(CoopNet_MyId()));
+	if (CoopNet_SpeedHere() != TimeScaleCounter) CoopNet_SpeedSet(); // the sea cap holds here too
 }
 
 void CoopNet_SpeedSend(string sBy)
@@ -216,7 +219,7 @@ void CoopNet_OnSpeed(int iFrom)
 // The shared speed, unless something of this player's own holds the game.
 void CoopNet_SpeedApply()
 {
-	if (TimeScaleCounter == iCoopNetSpeed) return;
+	if (TimeScaleCounter == CoopNet_SpeedHere()) return;
 	bool bHeld = dialogRun || bCoopNetPausedForBoarding;
 	if (CheckAttribute(&InterfaceStates, "Launched") && sti(InterfaceStates.Launched)) bHeld = true;
 	if (!bSeaActive && !bCoopNetInLocation && !IsEntity(&worldMap)) bHeld = true;
@@ -236,17 +239,23 @@ void CoopNet_SpeedApply()
 
 void CoopNet_SpeedSet()
 {
-	CoopNet_Log("speed: this game at x" + (1.0 + iCoopNetSpeed * 0.25));
-	TimeScaleCounter = iCoopNetSpeed;
+	int iHere = CoopNet_SpeedHere();
+	CoopNet_Log("speed: this game at x" + (1.0 + iHere * 0.25));
+	if (iHere != iCoopNetSpeed && CoopNet_Seconds() - fCoopNetSpeedCapAt > 10.0)
+	{
+		fCoopNetSpeedCapAt = CoopNet_Seconds();
+		CoopNet_Notice("Кооператив: в морском бою с кораблями другого игрока ускорение не больше x2");
+	}
+	TimeScaleCounter = iHere;
 	// as the time keys do (seadogs.c): the "TimeSpeed" mark tells R whether the game is sped up
-	if (iCoopNetSpeed == 0)
+	if (iHere == 0)
 	{
 		SetTimeScale(1.0);
 		if (IsPerkIntoList("TimeSpeed")) DelPerkFromActiveList("TimeSpeed");
 	}
 	else
 	{
-		SetTimeScale(1.0 + iCoopNetSpeed * 0.25);
+		SetTimeScale(1.0 + iHere * 0.25);
 		if (!IsPerkIntoList("TimeSpeed")) AddPerkToActiveList("TimeSpeed");
 	}
 }
@@ -260,4 +269,18 @@ void CoopNet_SpeedTick()
 	{
 		CoopNet_SpeedSend(CoopNet_PeerName(CoopNet_MyId()));
 	}
+}
+
+// The speed for this game: the shared one, but at most x2 at sea while another player's ships are in
+// the scene (they are steered by their reports, four a second: sped up more, they fall far behind and
+// a boarding here happens while they are still far off there).
+int CoopNet_SpeedHere()
+{
+	if (iCoopNetSpeed <= COOPNET_SPEED_SEA_MAX || !bSeaActive || bAbordageStarted) return iCoopNetSpeed;
+	for (int i = 0; i < iNumShips; i++)
+	{
+		int iChr = Ships[i];
+		if (CheckAttribute(&Characters[iChr], "coopPuppet")) return COOPNET_SPEED_SEA_MAX;
+	}
+	return iCoopNetSpeed;
 }

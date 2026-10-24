@@ -17,7 +17,8 @@ come from an installed copy of the Ship Pack: clone this repo over the game fold
 - `CoopMod/tests/session_test.cpp` — transport test: host + 3 clients over loopback with 30% packet loss.
 - `CoopMod/build.bat` — builds the DLL (VS 2022 Build Tools, x64) and copies it to `modules/`.
 - `CoopMod/test.bat` — builds and runs the transport test.
-- `CoopMod/run_pair.ps1` — starts a host and a client game instance on one PC and prints `coopnet.log`.
+- `CoopMod/run_pair.ps1` — starts a host and a client game instance on one PC and prints their log, `coopnet.test.log`
+  (`COOPNET_LOG`: a real game's `coopnet.log` is never touched by a test).
 - `Program/` — game scripts. The first commit is the unmodified Ship Pack; later commits are mod changes.
 - `Program/coop/coopnet.c` — script side: constants, native declarations, message tick and dispatch.
 
@@ -92,8 +93,9 @@ was drawn; it is found first as the object near the middle of the view nearest t
 about). Mirrored views (reflections) are left out. At sea the script gives the other players'
 flagships every frame (`CoopNet_SeaMark`, `CoopNet_SeaDrive`). No names while a game window is open.
 The font is d3dx9_43.dll's. A player
-off the screen is shown at its edge with an arrow toward it; a player ashore or at sea keeps its ship
-where it left the map, named "(на суше)" / "(в море)". A player whose ship isn't driven (not made yet, or the fallback merchant) still gets its
+off the screen is shown at its edge with an arrow toward it; a player at sea is shown where its ship is (its
+map position worked out from the sea as the game does, `getRTplayerShipXZ`: the map object lives on at
+sea but stays where the scene began); a player ashore keeps its ship where it left the map, named "(на суше)" / "(в море)". A player whose ship isn't driven (not made yet, or the fallback merchant) still gets its
 name where its report puts it (`CoopNet_MapMark`), so every player with a map position can be found.
 
 Player list: **F3** (free in the stock controls; read by the DLL itself, so it works on every screen)
@@ -383,6 +385,10 @@ One clock for everybody, owned by the host (`coop_clock.h`):
 - otherwise it runs at the pace of the slowest player that needs time to pass. Each player's
   pace is measured from how fast its own engine moves time (world map, weather on land/sea,
   time acceleration); menus and dialogs don't hold the others back.
+
+At sea with another player's ships in the scene a game runs at most at x2 (`CoopNet_SpeedHere`): those ships
+are steered by reports four times a second, and at x7 they fell 50-150 m behind (a boarding here while
+they were still far off there). The shared speed itself stays, and comes back when they leave.
 
 One game speed for everybody (`coop_rules.c`): the time keys (`TimeScaleCounter`, seadogs.c calls
 `CoopNet_SpeedChanged`) change it for all players, the last change wins (`MSG_SPEED`, the host

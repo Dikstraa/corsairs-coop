@@ -99,7 +99,11 @@ void Log(const char *fmt, ...)
 {
     static std::mutex mu;
     std::lock_guard<std::mutex> lock(mu);
-    if (FILE *f = fopen("coopnet.log", "a"))
+    // test runs log elsewhere (COOPNET_LOG), so a real game's log is never touched by them
+    static char path[MAX_PATH] = {};
+    if (!path[0] && !GetEnvironmentVariableA("COOPNET_LOG", path, sizeof path))
+        strcpy_s(path, "coopnet.log");
+    if (FILE *f = fopen(path, "a"))
     {
         SYSTEMTIME t;
         GetLocalTime(&t);

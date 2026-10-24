@@ -29,6 +29,7 @@
 #define COOPNET_SEA_RANGE		2500.0	// sea units: farther ships are not in this scene
 #define COOPNET_SEA_LEAD		6.0		// seconds ahead a puppet sails to
 #define COOPNET_SEA_CATCH_UP	0.15	// extra speed per sea unit a puppet is behind
+#define COOPNET_SEA_FAR		60.0	// sea units off before a puppet chases its ship from any side
 #define COOPNET_SEA_STALE		3.0		// seconds without a report before a player has left the sea
 #define COOPNET_SEA_PARK		10000.0	// how far a puppet sails off when its ship leaves
 
@@ -449,6 +450,12 @@ void CoopNet_SeaSteer(aref arP, aref arS)
 	float fZ = stf(arS.lz) + fDirZ * fSpeed * fAge;
 	float fBehind = (fX - stf(rChr.Ship.Pos.x)) * fDirX + (fZ - stf(rChr.Ship.Pos.z)) * fDirZ;
 	float fWanted = fSpeed + fBehind * COOPNET_SEA_CATCH_UP;
+	// far off (ahead of it or to a side too: the ship came back to this scene elsewhere) it sails back
+	// at full chase speed; behind along the course only says how much to slow down when close
+	float fOffX = fX - stf(rChr.Ship.Pos.x);
+	float fOffZ = fZ - stf(rChr.Ship.Pos.z);
+	float fOff = sqrt(fOffX * fOffX + fOffZ * fOffZ);
+	if (fOff > COOPNET_SEA_FAR) fWanted = fSpeed + fOff * COOPNET_SEA_CATCH_UP;
 	float fMax = fSpeed * 2.5;
 	if (fMax < 20.0) fMax = 20.0;
 	if (fWanted > fMax) fWanted = fMax;
@@ -987,7 +994,7 @@ void CoopNet_SeaLog()
 			if (!CheckAttribute(rChr, "Ship.Pos.x")) continue;
 			float fDX = stf(arS.lx) - stf(rChr.Ship.Pos.x);
 			float fDZ = stf(arS.lz) - stf(rChr.Ship.Pos.z);
-			sLine = sLine + "; " + arP.id + "/" + arS.idx + " " + sqrt(fDX * fDX + fDZ * fDZ) + " off (at " + rChr.Ship.Pos.x + " " + rChr.Ship.Pos.z + " ay " + rChr.Ship.Ang.y + " of " + arS.ay + ", speed " + rChr.Ship.Speed.z + " of " + arS.speed + ", task " + rChr.SeaAI.Task + " to " + rChr.SeaAI.Task.Pos.x + " " + rChr.SeaAI.Task.Pos.z + ")";
+			sLine = sLine + "; " + arP.id + "/" + arS.idx + " " + sqrt(fDX * fDX + fDZ * fDZ) + " off (at " + rChr.Ship.Pos.x + " " + rChr.Ship.Pos.z + " ay " + rChr.Ship.Ang.y + " of " + arS.ay + ", speed " + rChr.Ship.Speed.z + " of " + arS.speed + ", wanted " + rChr.coopSpeed + ", task " + rChr.SeaAI.Task + " to " + rChr.SeaAI.Task.Pos.x + " " + rChr.SeaAI.Task.Pos.z + ")";
 		}
 	}
 	CoopNet_Log(sLine);

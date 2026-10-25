@@ -277,6 +277,12 @@ void CoopNet_HeroPack()
 	CoopNetHeroPack.place.mapX = fCoopNetMapX;
 	CoopNetHeroPack.place.mapZ = fCoopNetMapZ;
 	CoopNetHeroPack.place.hasMap = bCoopNetHasMapPos;
+	// the island the map frame is made around (the way from a port to the map counts from it)
+	CoopNetHeroPack.place.wdmIsland = worldMap.island;
+	CoopNetHeroPack.place.wdmZeroX = worldMap.zeroX;
+	CoopNetHeroPack.place.wdmZeroZ = worldMap.zeroZ;
+	CoopNetHeroPack.place.wdmShipX = worldMap.playerShipX;
+	CoopNetHeroPack.place.wdmShipZ = worldMap.playerShipZ;
 }
 
 // Character indices anywhere in a Fellows list (Quantity is a count, not an index).
@@ -434,6 +440,7 @@ void CoopNet_HeroGoBack(aref arPack)
 			sLocator = "reload1";
 		}
 		CoopNet_Log("hero: back to " + sLocation + " " + sGroup + " " + sLocator);
+		CoopNet_HeroMapFrame(arPack, sLocation);
 		DoReloadCharacterToLocation(sLocation, sGroup, sLocator);
 		return;
 	}
@@ -447,6 +454,41 @@ void CoopNet_HeroGoBack(aref arPack)
 	pchar.Ship.Pos.z = 0.0;
 	if (!CheckAttribute(pchar, "Ship.Ang.y")) pchar.Ship.Ang.y = 0.0;
 	Land_MapLoad();
+}
+
+// The map frame (worldMap.island, zeroX/Z) of the island the hero comes back to: a port's way to the
+// map counts from it, and this game's frame is where its new game began (or where this player was
+// before a rollback), so out of that port the ship came onto the map somewhere else.
+void CoopNet_HeroMapFrame(aref arPack, string sLocation)
+{
+	// the island the location goes to sea from (as setWDMPointXZ), else its islandId (the mainland
+	// towns have islands of their own on the map, "Mein" is none); then what the hero had
+	string sIsland = "";
+	int iIsland = FindIslandBySeaLocation(sLocation);
+	if (iIsland >= 0) sIsland = Islands[iIsland].id;
+	int iLoc = FindLocation(sLocation);
+	if (sIsland == "" && iLoc >= 0 && CheckAttribute(&Locations[iLoc], "islandId")) sIsland = Locations[iLoc].islandId;
+	if (sIsland != "")
+	{
+		if (CheckAttribute(&worldMap, "islands." + sIsland + ".position.x"))
+		{
+			worldMap.island = sIsland;
+			worldMap.zeroX = worldMap.islands.(sIsland).position.x;
+			worldMap.zeroZ = worldMap.islands.(sIsland).position.z;
+			worldMap.playerShipX = worldMap.zeroX;
+			worldMap.playerShipZ = worldMap.zeroZ;
+			pchar.curIslandId = sIsland;
+			CoopNet_Log("hero: map frame " + sIsland + " at " + worldMap.zeroX + " " + worldMap.zeroZ);
+			return;
+		}
+	}
+	if (!CheckAttribute(arPack, "place.wdmIsland") || arPack.place.wdmIsland == "") return;
+	worldMap.island = arPack.place.wdmIsland;
+	worldMap.zeroX = arPack.place.wdmZeroX;
+	worldMap.zeroZ = arPack.place.wdmZeroZ;
+	worldMap.playerShipX = arPack.place.wdmShipX;
+	worldMap.playerShipZ = arPack.place.wdmShipZ;
+	CoopNet_Log("hero: map frame " + worldMap.island + " (the hero's) at " + worldMap.zeroX + " " + worldMap.zeroZ);
 }
 
 // ---- host ----------------------------------------------------------------------------------------

@@ -151,6 +151,9 @@ where it left.
   (new or loaded) the kept hero replaces the local one once the host's world is in: characters are
   found by id or created, ships get new `RealShips` slots, `Ship.Type` and `Fellows` indices are
   remapped, then the hero is reloaded to its location (or put on the world map where it was).
+  Back on land it also gets the map frame of that island (`worldMap.island`, `zeroX/Z`, as
+  `setWDMPointXZ` sets it): leaving a port for the sea and then for the map counts from it, and the
+  frame of this game was where its new game began, so the ship came onto the map far from the island.
 - Trees travel as `(depth, name, value)` entries in preorder, 300 per message; the receiver keeps
   the names of the current path and walks down from the root for every entry.
 
